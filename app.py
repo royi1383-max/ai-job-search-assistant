@@ -220,6 +220,7 @@ def render_sidebar():
             ("profile", t("nav_profile")),
             ("jobs",    t("nav_jobs")),
             ("cv",      t("nav_cv")),
+            ("cover",   t("nav_cover")),
             ("tracker", t("nav_tracker")),
             ("advisor", t("nav_advisor")),
         ]
