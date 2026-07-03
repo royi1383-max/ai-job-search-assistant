@@ -1,0 +1,34 @@
+# AI Job Search Assistant
+
+A Streamlit app that helps you run a structured job search: search jobs from multiple sources, tailor a CV and cover letter per role with Claude, track applications through a kanban-style pipeline, and get AI-assisted career advice — with a built-in, curated directory of Israeli companies by sector.
+
+## Features
+
+- **Job search** — pulls listings from multiple sources (Adzuna, Greenhouse, Lever) with keyword/role/experience-level filtering
+- **Company directory** — curated list of Israeli companies grouped by sector (VC, fintech, tech startups, consulting, banks, pharma, industrial, and more), each with career-page links
+- **CV builder** — generates a tailored CV per job using your profile + the job description (Claude API)
+- **Cover letter generator** — same idea, for cover letters
+- **Application tracker** — kanban board (Saved → Applied → Phone Screen → Interview → Offer / Rejected)
+- **Career advisor** — AI-assisted guidance on career paths and positioning
+- **Bilingual UI** — Hebrew and English
+
+## Tech stack
+
+Python, Streamlit, Anthropic (Claude) API, pandas, BeautifulSoup, PyMuPDF, python-docx, reportlab
+
+## Setup
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # fill in your own API keys
+streamlit run app.py
+```
+
+Then fill in your profile from the app's Profile tab — see `data/profile.example.json` for the expected fields. Drop your resume file(s) into a `resumes/` folder in the project root if you want the CV builder to reference an existing resume.
+
+## Project structure
+
+- `app.py` — main Streamlit app / navigation
+- `modules/` — one module per feature (job search, CV builder, cover letters, tracker, career advisor, profile, company database)
+- `config.py` — role categories, the Israeli company directory, and app configuration
+- `data/profile.example.json` — template for your personal profile (copy or recreate as `data/profile.json`, which is gitignored)

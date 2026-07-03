@@ -1,0 +1,29 @@
+{
+  "name": "Jane Doe",
+  "email": "jane.doe@example.com",
+  "phone": "050-0000000",
+  "linkedin": "linkedin.com/in/jane-doe",
+  "location": "Tel Aviv",
+  "summary": "One or two sentences describing your background, core strengths, and the kind of role you're targeting.",
+  "experience_text": "Job Title\nCompany Name • City • Start – End\n• Bullet point describing an achievement or responsibility.\n• Another bullet point.\n\nPrevious Job Title\nPrevious Company • City • Start – End\n• Bullet point.",
+  "education": "Degree • Institution • Years",
+  "military": "",
+  "skills": [
+    "SQL",
+    "Python",
+    "Excel"
+  ],
+  "certifications": "",
+  "languages": "English (Fluent)",
+  "target_roles": [
+    "Data Analyst"
+  ],
+  "salary_min": 0,
+  "salary_max": 0,
+  "work_type": [
+    "Hybrid",
+    "On-site",
+    "Remote"
+  ],
+  "priorities": "What matters most to you in your next role"
+}

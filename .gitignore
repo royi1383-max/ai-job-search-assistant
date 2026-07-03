@@ -1,0 +1,30 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Personal data — never commit real profile, resumes, or application tracking
+data/profile.json
+data/applications.json
+data/career_urls.json
+resumes/
+קורות חיים-Royi/
+
+# Debug artifacts (scraper output, not source)
+debug_*.txt
+*.log
+C:Usersroyi1AppDataLocalTempstreamlit_run.log
+
+# Third-party skill bundles — not part of this app
+.agents/
+*.zip
+skills-lock.json
+
+# Duplicate of data already in config.py
+generated_companies.py
+
+# Source spreadsheet already encoded into config.py — not needed in the repo
+grand_master_gush_dan_all_sectors_map.xlsx
