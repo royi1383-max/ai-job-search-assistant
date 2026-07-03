@@ -164,8 +164,9 @@ body, .stApp {
     height: 8px;
 }
 
-/* Hide streamlit branding */
-#MainMenu, footer, header { visibility: hidden; }
+/* Hide streamlit branding — NOT header, it holds the sidebar collapse/expand toggle */
+#MainMenu, footer { visibility: hidden; }
+header [data-testid="stToolbar"] { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
