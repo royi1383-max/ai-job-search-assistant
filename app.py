@@ -19,6 +19,11 @@ html, body, [class*="css"] {
     font-family: 'Inter', sans-serif;
 }
 
+/* Dark header (holds the sidebar expand arrow when collapsed) */
+header[data-testid="stHeader"] {
+    background: #0d1117;
+}
+
 /* Dark sidebar */
 [data-testid="stSidebar"] {
     background: #0d1117;
@@ -164,9 +169,11 @@ body, .stApp {
     height: 8px;
 }
 
-/* Hide streamlit branding — NOT header, it holds the sidebar collapse/expand toggle */
+/* Hide streamlit branding only — NOT the whole toolbar, it also contains the
+   sidebar expand/collapse arrow (stExpandSidebarButton) which must stay visible */
 #MainMenu, footer { visibility: hidden; }
-header [data-testid="stToolbar"] { visibility: hidden; }
+header [data-testid="stToolbarActions"] { visibility: hidden; }
+header [data-testid="stAppDeployButton"] { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
