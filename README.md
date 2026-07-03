@@ -10,11 +10,12 @@ A Streamlit app that helps you run a structured job search: search jobs from mul
 - **Cover letter generator** — same idea, for cover letters
 - **Application tracker** — kanban board (Saved → Applied → Phone Screen → Interview → Offer / Rejected)
 - **Career advisor** — AI-assisted guidance on career paths and positioning
+- **Smart company match (RAG)** — free-text semantic search over the company directory (retrieval), then Claude explains the matches grounded only in what was retrieved (generation). Uses TF-IDF by default; install `sentence-transformers` for dense embedding-based retrieval instead (see below)
 - **Bilingual UI** — Hebrew and English
 
 ## Tech stack
 
-Python, Streamlit, Anthropic (Claude) API, pandas, BeautifulSoup, PyMuPDF, python-docx, reportlab
+Python, Streamlit, Anthropic (Claude) API, pandas, scikit-learn, BeautifulSoup, PyMuPDF, python-docx, reportlab
 
 ## Setup
 
@@ -26,9 +27,15 @@ streamlit run app.py
 
 Then fill in your profile from the app's Profile tab — see `data/profile.example.json` for the expected fields. Drop your resume file(s) into a `resumes/` folder in the project root if you want the CV builder to reference an existing resume.
 
+**Optional — dense embeddings for Smart Company Match:** by default the semantic search uses TF-IDF (no extra download, works everywhere, including free-tier hosting). For higher-quality dense embedding retrieval, install `sentence-transformers` locally:
+```bash
+pip install sentence-transformers
+```
+The app detects it automatically and switches to embeddings — no code changes needed. It's left out of `requirements.txt` by default since it pulls in `torch`, which is too heavy for constrained free-tier deployments.
+
 ## Project structure
 
 - `app.py` — main Streamlit app / navigation
-- `modules/` — one module per feature (job search, CV builder, cover letters, tracker, career advisor, profile, company database)
+- `modules/` — one module per feature (job search, CV builder, cover letters, tracker, career advisor, profile, company database, semantic company search)
 - `config.py` — role categories, the Israeli company directory, and app configuration
 - `data/profile.example.json` — template for your personal profile (copy or recreate as `data/profile.json`, which is gitignored)
