@@ -221,6 +221,7 @@ def render_sidebar():
             ("jobs",    t("nav_jobs")),
             ("cv",      t("nav_cv")),
             ("cover",   t("nav_cover")),
+            ("companies", t("nav_companies")),
             ("tracker", t("nav_tracker")),
             ("advisor", t("nav_advisor")),
         ]
@@ -353,6 +354,11 @@ def page_cover():
     mod_cover.render(st.session_state.lang)
 
 
+def page_companies():
+    import modules.company_db as mod_companies
+    mod_companies.render(st.session_state.lang)
+
+
 def page_tracker():
     import modules.tracker as mod_tracker
     mod_tracker.render(st.session_state.lang)
@@ -378,6 +384,8 @@ elif page == "cv":
     page_cv()
 elif page == "cover":
     page_cover()
+elif page == "companies":
+    page_companies()
 elif page == "tracker":
     page_tracker()
 elif page == "advisor":

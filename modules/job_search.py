@@ -478,6 +478,24 @@ def search_jobs(
         li_raw = _filter_by_location(li_raw, loc_clean)
         results.extend(li_raw)
 
+    # AllJobs: one request per query; source already applies city/experience server-side
+    if "AllJobs" in sources:
+        aj_jobs = []
+        for query in queries:
+            aj_jobs.extend(_fetch_alljobs(query, alljobs_loc, alljobs_exp))
+        aj_jobs = _filter_by_location(aj_jobs, loc_clean)
+        aj_jobs = _filter_by_experience(aj_jobs, exp_level)
+        results.extend(aj_jobs)
+
+    # Drushim: one request per query; source already applies city/experience server-side
+    if "Drushim" in sources:
+        dr_jobs = []
+        for query in queries:
+            dr_jobs.extend(_fetch_drushim(query, drushim_loc, drushim_exp))
+        dr_jobs = _filter_by_location(dr_jobs, loc_clean)
+        dr_jobs = _filter_by_experience(dr_jobs, exp_level)
+        results.extend(dr_jobs)
+
     # Deduplicate by id
     seen: set[str] = set()
     unique = []
@@ -581,6 +599,24 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
             unsafe_allow_html=True,
         )
 
+        profile = st.session_state.get("profile", {})
+        if profile.get("skills"):
+            strengths, gaps = explain_match(job, profile)
+            if strengths or gaps:
+                with st.expander("🎯 " + ("התאמת כישורים" if lang == "he" else "Skill Match")):
+                    if strengths:
+                        st.markdown(
+                            ("יש לך: " if lang == "he" else "You have: ")
+                            + " ".join(f'<span class="skill-tag tag-green">{_html.escape(s)}</span>' for s in strengths),
+                            unsafe_allow_html=True,
+                        )
+                    if gaps:
+                        st.markdown(
+                            ("חסר לך: " if lang == "he" else "Missing: ")
+                            + " ".join(f'<span class="skill-tag tag-red">{_html.escape(g)}</span>' for g in gaps),
+                            unsafe_allow_html=True,
+                        )
+
         uid = job.get("id", abs(hash(job.get("url", "") + job.get("title", ""))))
         c1, c2, c3 = st.columns([1, 1, 3])
         with c1:
@@ -661,8 +697,8 @@ def _render_jobs(lang: str):
     with col_src:
         sources = st.multiselect(
             "מקורות" if lang == "he" else "Sources",
-            ["Greenhouse", "Lever", "LinkedIn"],
-            default=["Greenhouse", "Lever", "LinkedIn"],
+            ["Greenhouse", "Lever", "LinkedIn", "AllJobs", "Drushim"],
+            default=["Greenhouse", "Lever", "LinkedIn", "AllJobs", "Drushim"],
             label_visibility="collapsed",
         )
 
