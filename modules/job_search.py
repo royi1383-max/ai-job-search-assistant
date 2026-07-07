@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from config import (
     JOB_SEARCH_CACHE_TTL, DATA_DIR, APPLICATIONS_PATH,
     ROLE_CATEGORIES, PRIMARY_QUERIES, MATCH_KEYWORDS,
+    PRIMARY_QUERIES_HE, MATCH_KEYWORDS_HE,
     EXPERIENCE_LEVELS, EXPERIENCE_EXCLUDE,
 )
 
@@ -26,6 +27,10 @@ SOURCE_COLORS = {
     "Drushim":    "#3b82f6",
     "LinkedIn":   "#0a66c2",
     "Career Page":"#e11d48",
+    "SmartRecruiters": "#00b074",
+    "JobMaster":  "#d946ef",
+    "Comeet":     "#f97316",
+    "Ashby":      "#7c3aed",
 }
 
 LOCATION_PRESETS = [
@@ -115,7 +120,7 @@ def _parse_date_str(s: str) -> str:
     m = _re.search(r'לפני\s+(\d+)\s+ימי?', s)
     if m:
         return (today - timedelta(days=int(m.group(1)))).strftime("%Y-%m-%d")
-    if "היום" in s or "שעה" in s or "שעות" in s or "ago" in s.lower():
+    if "היום" in s or "שעה" in s or "שעות" in s or "דקה" in s or "דקות" in s or "ago" in s.lower():
         return today.strftime("%Y-%m-%d")
     if "אתמול" in s or "yesterday" in s.lower():
         return (today - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -143,13 +148,39 @@ def _filter_by_date(jobs: list[dict], days: int = 7) -> list[dict]:
 
 # ── Category post-filter ──────────────────────────────────────────────────────
 
+# Hebrew job titles use inconsistent gender-suffix notation ("אנליסט/ית",
+# "אנליסט.ית", "אנליסטית") and final-letter (sofit) forms shift when a suffix
+# is attached (e.g. "כלכלן" -> "כלכלנ.ית"). Plain substring matching (used for
+# the English keywords) misses these, so Hebrew keywords are matched via a
+# normalized, suffix-tolerant regex instead: each word-stem may appear
+# anywhere in the title (order-independent, to also catch compound titles
+# like "אנליסט/ית מומחה/ית אשראי"), with an optional trailing suffix.
+_HE_SOFIT_MAP = str.maketrans("ךםןףץ", "כמנפצ")
+_he_pattern_cache: dict[str, re.Pattern] = {}
+
+
+def _normalize_he(s: str) -> str:
+    return s.translate(_HE_SOFIT_MAP)
+
+
+def _he_keyword_pattern(phrase: str) -> re.Pattern:
+    if phrase not in _he_pattern_cache:
+        words = _normalize_he(phrase).split(" ")
+        lookaheads = "".join(f"(?=.*{re.escape(w)}\\S{{0,3}})" for w in words)
+        _he_pattern_cache[phrase] = re.compile(lookaheads)
+    return _he_pattern_cache[phrase]
+
+
 def _matches_categories(job: dict, selected_categories: list[str]) -> bool:
     """Return True if job title contains at least one keyword from any selected category."""
     if not selected_categories:
         return True
     title = job.get("title", "").lower()
+    title_he = _normalize_he(job.get("title", ""))
     for cat in selected_categories:
         if any(kw in title for kw in MATCH_KEYWORDS.get(cat, [])):
+            return True
+        if any(_he_keyword_pattern(kw).search(title_he) for kw in MATCH_KEYWORDS_HE.get(cat, [])):
             return True
     return False
 
@@ -161,6 +192,7 @@ def get_search_queries(selected_categories: list[str], custom: str = "") -> list
     queries = []
     for cat in selected_categories:
         queries.extend(PRIMARY_QUERIES.get(cat, []))
+        queries.extend(PRIMARY_QUERIES_HE.get(cat, []))
     if custom.strip():
         queries.append(custom.strip())
     return list(dict.fromkeys(queries))
@@ -168,7 +200,10 @@ def get_search_queries(selected_categories: list[str], custom: str = "") -> list
 
 # ── Greenhouse public API ─────────────────────────────────────────────────────
 
-# Only boards confirmed live (tested 2026-06). Others return 404.
+# Only boards confirmed live (tested 2026-07). Others return 404, or resolve
+# to an unrelated company squatting the same slug (verified by checking actual
+# job content/locations, not just HTTP 200 — e.g. "orca", "bcg", "iai", "corp"
+# all 200'd but were unrelated companies and were excluded).
 GREENHOUSE_BOARDS = [
     # Israeli tech / SaaS
     "nice", "taboola", "appsflyer", "similarweb", "axonius", "pendo",
@@ -176,8 +211,9 @@ GREENHOUSE_BOARDS = [
     "riskified", "transmitsecurity", "catonetworks", "innovid",
     "jfrog", "liveperson", "optimove", "bigid", "yotpo", "forter",
     "orioninnovation", "bringg", "torq", "doubleverify",
+    "connecteam", "orcasecurity", "openweb",
     # Israeli-founded, global
-    "wolt", "payoneer",
+    "wolt", "payoneer", "melio", "pagaya",
     # Global companies with large Israel R&D
     "samsara", "unity3d", "commvault",
 ]
@@ -214,9 +250,9 @@ def _fetch_greenhouse(board: str) -> list[dict]:
 
 # ── Lever public API ──────────────────────────────────────────────────────────
 
-# Only boards confirmed live (tested 2025-06).
+# Only boards confirmed live (tested 2026-07).
 LEVER_BOARDS = [
-    "walkme", "cloudinary", "houzz",
+    "walkme", "cloudinary", "houzz", "logz",
 ]
 
 
@@ -249,6 +285,169 @@ def _fetch_lever(board: str) -> list[dict]:
                 ).strftime("%Y-%m-%d") if job.get("createdAt") else "",
             })
         return results
+    except Exception:
+        return []
+
+
+# ── SmartRecruiters public API ────────────────────────────────────────────────
+
+# Only slugs confirmed live (tested 2026-07). Others 404 or resolve to an
+# unrelated company squatting the same slug.
+SMARTRECRUITERS_BOARDS = ["atera"]
+
+
+@st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
+def _fetch_smartrecruiters(company: str) -> list[dict]:
+    """Fetch ALL jobs from one SmartRecruiters company board (cached by company only)."""
+    url = f"https://api.smartrecruiters.com/v1/companies/{company}/postings"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=8)
+        if r.status_code != 200:
+            return []
+        data = r.json().get("content", [])
+        results = []
+        for job in data:
+            loc = job.get("location", {}) or {}
+            city = loc.get("city", "") or ("Remote" if loc.get("remote") else "")
+            company_name = (job.get("company", {}) or {}).get("name", "") or company.replace("-", " ").title()
+            results.append({
+                "id": f"sr_{company}_{job.get('id')}",
+                "title": job.get("name", ""),
+                "company": company_name,
+                "location": city,
+                "source": "SmartRecruiters",
+                "url": f"https://jobs.smartrecruiters.com/{company_name.replace(' ', '')}/{job.get('id')}",
+                "description": "",
+                "date": (job.get("releasedDate") or "")[:10],
+            })
+        return results
+    except Exception:
+        return []
+
+
+# ── Ashby public API ──────────────────────────────────────────────────────────
+
+# Only slugs confirmed live (tested 2026-07) by inspecting actual job content —
+# a same-name slug can belong to an unrelated global company (e.g. "aleph"
+# resolves to a US FP&A startup, not the Israeli Aleph VC — excluded).
+ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant"]
+
+
+@st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
+def _fetch_ashby(board: str) -> list[dict]:
+    """Fetch ALL jobs from one Ashby job board (cached by board only)."""
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{board}"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=8)
+        if r.status_code != 200:
+            return []
+        data = r.json().get("jobs", [])
+        results = []
+        for job in data:
+            results.append({
+                "id": f"ab_{board}_{job.get('id')}",
+                "title": job.get("title", ""),
+                "company": board.replace("-", " ").title(),
+                "location": job.get("location", ""),
+                "source": "Ashby",
+                "url": job.get("jobUrl", ""),
+                "description": _strip_html(job.get("descriptionHtml", ""))[:1500],
+                "date": (job.get("publishedAt") or "")[:10],
+            })
+        return results
+    except Exception:
+        return []
+
+
+# ── Comeet public API ─────────────────────────────────────────────────────────
+
+# Each entry is ("url", slug, uid) for the hosted-page pattern (jobs embedded as
+# inline JS on comeet.com/jobs/{slug}/{uid}) or ("widget", uid, token) for the
+# self-hosted-widget pattern (calls the careers-api directly). Only entries
+# confirmed live (tested 2026-07) by inspecting actual job content — Comeet
+# returns 400 for a bad token/uid, but a stale placeholder token from their own
+# docs (seen copy-pasted on some company sites) also 400s, so absence here can
+# mean "found the embed but the token was fake," not just "no Comeet usage."
+COMEET_BOARDS = [
+    ("url", "cyera", "17.008"),
+    ("url", "riverside-fm", "66.009"),
+    ("url", "bizzabo", "A5.000"),
+    ("url", "explorium", "B4.00E"),
+    ("url", "immunai", "37.009"),
+    ("url", "cognyte", "F2.009"),
+    ("url", "infinidat", "D6.003"),
+    ("url", "team8", "61.003"),
+    ("url", "joinattil", "38.00A"),          # AT&T Israel
+    ("widget", "A2.00C", "2ACD5C02AC10081008AB01560180C804"),  # Moon Active
+    ("widget", "41.009", "14952452466D3DB7B61495240B91"),      # eToro
+    ("widget", "B1.001", "1B16C4BD7005131B1A26F391B1"),        # Overwolf
+    ("url", "fiverr", "60.002"),
+    ("url", "buyme", "B2.008"),
+    ("url", "pango", "59.002"),
+    ("widget", "62.002", "262988131015727264C41572E4C10AE10AE"),  # Global-e
+    ("widget", "28.003", "82330D228AF208C208C493B30D2208C38F538F5"),  # SuperPlay
+    # These 6 were extracted directly from each company's own rendered career
+    # page (via a headless browser, since the widget loads jobs client-side
+    # with no static HTML footprint) rather than guessed — so identity is
+    # certain even where 0 jobs are currently open (Gloat, Elementor).
+    ("widget", "D3.00A", "3DA1342F683DA22AAF683DAF68F68F68"),      # OurCrowd
+    ("widget", "67.00A", "76A2C7C163E33E625122C7C1DA8ED476A33E6"), # Medison Pharma
+    ("widget", "A1.00C", "1AC6B0A08F0C6B085C85CD60F0C1AC"),        # Lumenis
+    ("widget", "94.009", "49916FD16FD24C89320DCB296116FD2961"),   # Tailor Brands
+    ("widget", "E5.000", "5E02340002F0017800234011A01780"),       # Gloat
+    ("widget", "A3.00F", "3AF126BB0D161A3AF161A00B0D126B"),       # Elementor
+]
+
+
+def _parse_comeet_positions(data: list, uid: str) -> list[dict]:
+    results = []
+    for job in data:
+        loc = job.get("location", {}) or {}
+        city = loc.get("name") or loc.get("city") or ("Remote" if loc.get("is_remote") else "")
+        desc = ""
+        details = (job.get("custom_fields") or {}).get("details") or []
+        for d in details:
+            if d.get("name") == "Description" and d.get("value"):
+                desc = _strip_html(d["value"])[:1500]
+                break
+        results.append({
+            "id": f"cm_{uid}_{job.get('uid')}",
+            "title": job.get("name", ""),
+            "company": job.get("company_name", ""),
+            "location": city,
+            "source": "Comeet",
+            "url": job.get("url_active_page") or job.get("url_comeet_hosted_page", ""),
+            "description": desc,
+            "date": (job.get("time_updated") or "")[:10],
+        })
+    return results
+
+
+@st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
+def _fetch_comeet(kind: str, a: str, b: str) -> list[dict]:
+    """Fetch ALL jobs from one Comeet board (cached by board only)."""
+    try:
+        if kind == "url":
+            slug, uid = a, b
+            r = requests.get(f"https://www.comeet.com/jobs/{slug}/{uid}", headers=HEADERS, timeout=10)
+            if r.status_code != 200:
+                return []
+            m = _re.search(r'COMPANY_POSITIONS_DATA\s*=\s*(\[.*?\]);', r.text, re.S)
+            if not m:
+                return []
+            data = json.loads(m.group(1))
+        else:
+            uid, token = a, b
+            r = requests.get(
+                f"https://www.comeet.co/careers-api/2.0/company/{uid}/positions",
+                params={"token": token}, headers=HEADERS, timeout=10,
+            )
+            if r.status_code != 200:
+                return []
+            data = r.json()
+            if not isinstance(data, list):
+                return []
+        return _parse_comeet_positions(data, uid)
     except Exception:
         return []
 
@@ -303,64 +502,97 @@ def _fetch_alljobs(query: str, location: str = "תל אביב", exp_code: str = 
 
 @st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
 def _fetch_drushim(query: str, location: str = "", exp_code: str = "0") -> list[dict]:
+    """Fetch jobs from Drushim (tested 2026-07). Site migrated to a Vue/Nuxt SPA
+    with a path-based search URL (`/jobs/search/{query}/`) — the old
+    `?q=`/`?city=` query-param scheme now 404s server-side and silently
+    returns 0 jobs. No location param is sent server-side (Drushim now
+    requires an opaque geolexid per city instead of a plain name); city
+    narrowing is left to the existing client-side _filter_by_location()
+    post-filter in search_jobs(), which already runs for every source.
+    """
     try:
         from bs4 import BeautifulSoup
-        q = requests.utils.quote(query)
         base = "https://www.drushim.co.il"
-        loc_param = ""
-        if location and location.lower() not in ("all israel", ""):
-            loc_map = {
-                "tel aviv": "תל-אביב", "remote": "", "haifa": "חיפה",
-                "jerusalem": "ירושלים", "herzliya": "הרצליה",
-                "ra'anana": "רעננה", "beer sheva": "באר-שבע",
-                "ramat gan": "רמת-גן", "petah tikva": "פתח-תקווה",
-                "givatayim": "גבעתיים",
-            }
-            he_city = loc_map.get(location.lower(), location)
-            if he_city:
-                loc_param = f"&city={requests.utils.quote(he_city)}"
-
-        exp_param = f"&experience={exp_code}" if exp_code and exp_code != "0" else "&experience=0"
-        url = f"{base}/jobs/search/?q={q}{loc_param}&jobCat=0{exp_param}"
+        q = requests.utils.quote(query, safe="")
+        url = f"{base}/jobs/search/{q}/?ssaen=1"
         r = requests.get(url, headers=HEADERS, timeout=10)
         if r.status_code != 200:
             return []
         soup = BeautifulSoup(r.text, "html.parser")
         results = []
 
-        for card in soup.select(".job-item, .list-item, article.job")[:25]:
-            title_el = (card.select_one(".job-title a") or
-                        card.select_one("h2 a") or
-                        card.select_one(".title a"))
-            company_el = (card.select_one(".company-name") or
-                          card.select_one(".employer") or
-                          card.select_one(".company"))
-            loc_el = (card.select_one(".job-location") or
-                      card.select_one(".location") or
-                      card.select_one(".city"))
-            desc_el = (card.select_one(".job-description") or
-                       card.select_one(".description") or
-                       card.select_one("p"))
-            date_el = (card.select_one(".job-date") or
-                       card.select_one(".date") or
-                       card.select_one("[class*='date']") or
-                       card.select_one(".time-since") or
-                       card.select_one("time"))
+        for card in soup.select(".job-item")[:25]:
+            title_el = card.select_one(".job-url")
+            company_el = card.select_one(".job-details-top span.font-weight-medium")
+            loc_el = card.select_one(".job-details-sub .ml-2")
+            date_el = card.select_one("span.display-18.inline-flex")
+            href_el = card.select_one("a[href^='/job/']")
+            desc_el = card.select_one(".job-intro p")
 
             if not title_el:
                 continue
-            href = title_el.get("href", "")
+            href = href_el.get("href", "") if href_el else ""
             full_url = (base + href) if href.startswith("/") else href
-            date_raw = (date_el.get("datetime") or date_el.text) if date_el else ""
+            loc_text = loc_el.get_text(strip=True).rstrip("|").strip() if loc_el else ""
             results.append({
-                "id": f"dr_{abs(hash(title_el.text.strip() + href))}",
-                "title": title_el.text.strip(),
+                "id": f"dr_{abs(hash(title_el.get_text(strip=True) + href))}",
+                "title": title_el.get_text(strip=True),
+                "company": company_el.get_text(strip=True) if company_el else "",
+                "location": loc_text or location,
+                "source": "Drushim",
+                "url": full_url or url,
+                "description": desc_el.get_text(strip=True)[:300] if desc_el else "",
+                "date": _parse_date_str(date_el.get_text(strip=True) if date_el else ""),
+            })
+        return results
+    except Exception:
+        return []
+
+
+# ── JobMaster scraper ─────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
+def _fetch_jobmaster(query: str, location: str = "") -> list[dict]:
+    try:
+        from bs4 import BeautifulSoup
+        base = "https://www.jobmaster.co.il"
+        q = requests.utils.quote(query)
+        loc_param = f"&l={requests.utils.quote(location)}" if location and location.lower() not in ("all israel", "") else ""
+        url = f"{base}/jobs/?q={q}{loc_param}"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for card in soup.select("article.JobItem")[:25]:
+            title_el   = card.select_one(".CardHeader")
+            company_el = card.select_one(".CompanyNameLink span") or card.select_one(".ByTitle")
+            loc_el     = card.select_one(".jobLocation")
+            desc_el    = card.select_one(".jobShortDescription")
+            date_el    = card.select_one(".paddingTop10px .Gray")
+            if not title_el:
+                continue
+
+            href = title_el.get("href", "") if title_el.name == "a" else ""
+            link_el = card.select_one("a.CardHeader")
+            if link_el:
+                href = link_el.get("href", "")
+            if not href:
+                m = _re.search(r'(\d+)$', card.get("id", ""))
+                if m:
+                    href = f"/jobs/checknum.asp?key={m.group(1)}"
+            full_url = (base + href) if href.startswith("/") else href
+
+            title = title_el.text.strip()
+            results.append({
+                "id": f"jm_{abs(hash(title + href))}",
+                "title": title,
                 "company": company_el.text.strip() if company_el else "",
                 "location": loc_el.text.strip() if loc_el else location,
-                "source": "Drushim",
-                "url": full_url or f"{base}/jobs/search/?q={q}",
+                "source": "JobMaster",
+                "url": full_url or url,
                 "description": desc_el.text.strip()[:300] if desc_el else "",
-                "date": _parse_date_str(date_raw.strip()),
+                "date": _parse_date_str(date_el.text.strip() if date_el else ""),
             })
         return results
     except Exception:
@@ -470,6 +702,30 @@ def search_jobs(
         lv_jobs = _filter_by_experience(lv_jobs, exp_level)
         results.extend(lv_jobs)
 
+    if "SmartRecruiters" in sources:
+        sr_jobs = []
+        for board in SMARTRECRUITERS_BOARDS:
+            sr_jobs.extend(_fetch_smartrecruiters(board))
+        sr_jobs = _filter_by_location(sr_jobs, loc_clean)
+        sr_jobs = _filter_by_experience(sr_jobs, exp_level)
+        results.extend(sr_jobs)
+
+    if "Comeet" in sources:
+        cm_jobs = []
+        for kind, a, b in COMEET_BOARDS:
+            cm_jobs.extend(_fetch_comeet(kind, a, b))
+        cm_jobs = _filter_by_location(cm_jobs, loc_clean)
+        cm_jobs = _filter_by_experience(cm_jobs, exp_level)
+        results.extend(cm_jobs)
+
+    if "Ashby" in sources:
+        ab_jobs = []
+        for board in ASHBY_BOARDS:
+            ab_jobs.extend(_fetch_ashby(board))
+        ab_jobs = _filter_by_location(ab_jobs, loc_clean)
+        ab_jobs = _filter_by_experience(ab_jobs, exp_level)
+        results.extend(ab_jobs)
+
     # LinkedIn: one request per query; filter location locally too (server-side geo is imprecise)
     if "LinkedIn" in sources:
         li_raw = []
@@ -495,6 +751,15 @@ def search_jobs(
         dr_jobs = _filter_by_location(dr_jobs, loc_clean)
         dr_jobs = _filter_by_experience(dr_jobs, exp_level)
         results.extend(dr_jobs)
+
+    # JobMaster: one request per query; no server-side experience filter available
+    if "JobMaster" in sources:
+        jm_jobs = []
+        for query in queries:
+            jm_jobs.extend(_fetch_jobmaster(query, alljobs_loc))
+        jm_jobs = _filter_by_location(jm_jobs, loc_clean)
+        jm_jobs = _filter_by_experience(jm_jobs, exp_level)
+        results.extend(jm_jobs)
 
     # Deduplicate by id
     seen: set[str] = set()
@@ -697,8 +962,8 @@ def _render_jobs(lang: str):
     with col_src:
         sources = st.multiselect(
             "מקורות" if lang == "he" else "Sources",
-            ["Greenhouse", "Lever", "LinkedIn", "AllJobs", "Drushim"],
-            default=["Greenhouse", "Lever", "LinkedIn", "AllJobs", "Drushim"],
+            ["Greenhouse", "Lever", "SmartRecruiters", "Comeet", "Ashby", "LinkedIn", "AllJobs", "Drushim", "JobMaster"],
+            default=["Greenhouse", "Lever", "SmartRecruiters", "Comeet", "Ashby", "LinkedIn", "AllJobs", "Drushim", "JobMaster"],
             label_visibility="collapsed",
         )
 

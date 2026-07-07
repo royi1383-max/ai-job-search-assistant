@@ -226,7 +226,7 @@ def check_company_jobs(company: dict, kws: list[str]) -> list[dict]:
     Priority: Greenhouse → Lever → schema.org (bonus) → AllJobs fallback.
     Always falls back to AllJobs if the primary source returns nothing.
     """
-    from modules.job_search import _fetch_greenhouse, _fetch_lever
+    from modules.job_search import _fetch_greenhouse, _fetch_lever, _fetch_comeet, _fetch_ashby
 
     raw: list[dict] = []
 
@@ -235,6 +235,13 @@ def check_company_jobs(company: dict, kws: list[str]) -> list[dict]:
 
     elif company.get("lever"):
         raw = _fetch_lever(company["lever"])
+
+    elif company.get("comeet"):
+        kind, a, b = company["comeet"]
+        raw = _fetch_comeet(kind, a, b)
+
+    elif company.get("ashby"):
+        raw = _fetch_ashby(company["ashby"])
 
     else:
         # Try schema.org on a known career URL if explicitly set
@@ -396,12 +403,12 @@ def render(lang: str):
     st.markdown(f"#### {scan_header}")
     # Count companies with API support
     api_cos = sum(1 for s, cos in ISRAELI_COMPANIES.items() for co in cos
-                  if co.get("greenhouse") or co.get("lever"))
+                  if co.get("greenhouse") or co.get("lever") or co.get("comeet") or co.get("ashby"))
     total_cos = sum(len(cos) for cos in ISRAELI_COMPANIES.values())
     st.caption(
-        f"סריקה ישירה דרך Greenhouse/Lever API — {api_cos} חברות מתוך {total_cos} עם גישה ישירה"
+        f"סריקה ישירה דרך Greenhouse/Lever/Comeet API — {api_cos} חברות מתוך {total_cos} עם גישה ישירה"
         if lang == "he"
-        else f"Direct scan via Greenhouse/Lever API — {api_cos} of {total_cos} companies have API access"
+        else f"Direct scan via Greenhouse/Lever/Comeet API — {api_cos} of {total_cos} companies have API access"
     )
 
     c1, c2, c3 = st.columns([3, 3, 1])
@@ -524,7 +531,7 @@ def render(lang: str):
         active     = co.get("active_jobs", 0)
         homepage   = co.get("url", "")
         career_url = co.get("career_url", "")  # only explicit career page
-        has_api    = bool(co.get("greenhouse") or co.get("lever"))
+        has_api    = bool(co.get("greenhouse") or co.get("lever") or co.get("comeet") or co.get("ashby"))
         is_followed = name in followed
 
         if only_followed and not is_followed:

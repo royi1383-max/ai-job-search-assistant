@@ -12,19 +12,39 @@ import json
 import numpy as np
 import streamlit as st
 
-from config import ISRAELI_COMPANIES
+from config import ISRAELI_COMPANIES, JOB_SEARCH_CACHE_TTL
 from modules.career_advisor import _claude
 
 _EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def _company_text(co: dict, sector: str) -> str:
+def _live_jobs_for(co: dict) -> list[dict]:
+    """Fetch current open jobs for a company via its tagged ATS API, if any."""
+    from modules.job_search import _fetch_greenhouse, _fetch_lever, _fetch_comeet, _fetch_ashby
+    try:
+        if co.get("greenhouse"):
+            return _fetch_greenhouse(co["greenhouse"])
+        if co.get("lever"):
+            return _fetch_lever(co["lever"])
+        if co.get("comeet"):
+            kind, a, b = co["comeet"]
+            return _fetch_comeet(kind, a, b)
+        if co.get("ashby"):
+            return _fetch_ashby(co["ashby"])
+    except Exception:
+        pass
+    return []
+
+
+def _company_text(co: dict, sector: str, job_titles: list[str]) -> str:
     parts = [co.get("name", ""), sector, co.get("location", "")]
     if co.get("he"):
         parts.append(co["he"])
     for tag in ("specialties",):
         if co.get(tag):
             parts.append(", ".join(co[tag]))
+    if job_titles:
+        parts.append("Open roles: " + ", ".join(job_titles))
     return " — ".join(p for p in parts if p)
 
 
@@ -32,11 +52,19 @@ def _corpus() -> list[dict]:
     rows = []
     for sector, companies in ISRAELI_COMPANIES.items():
         for co in companies:
-            rows.append({**co, "sector": sector, "text": _company_text(co, sector)})
+            jobs = _live_jobs_for(co)
+            titles = [j.get("title", "") for j in jobs if j.get("title")]
+            rows.append({
+                **co,
+                "sector": sector,
+                "text": _company_text(co, sector, titles),
+                "active_jobs": len(jobs),
+                "sample_titles": titles[:5],
+            })
     return rows
 
 
-@st.cache_resource(show_spinner="Loading semantic search index...")
+@st.cache_resource(show_spinner="Loading semantic search index...", ttl=JOB_SEARCH_CACHE_TTL)
 def _dense_index():
     """Returns (encoder, embeddings) using sentence-transformers, or None if unavailable."""
     try:
@@ -50,7 +78,7 @@ def _dense_index():
         return None
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, ttl=JOB_SEARCH_CACHE_TTL)
 def _sparse_index():
     """TF-IDF fallback — always available, no model download required."""
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -88,10 +116,14 @@ def explain_matches(query: str, profile: dict, matches: list[dict]) -> str:
     if not matches:
         return ""
 
-    facts = "\n".join(
-        f"- {m['name']} ({m['sector']}, {m.get('location', 'N/A')})"
-        for m in matches
-    )
+    def _fact_line(m: dict) -> str:
+        line = f"- {m['name']} ({m['sector']}, {m.get('location', 'N/A')})"
+        titles = m.get("sample_titles")
+        if titles:
+            line += f" — currently hiring: {', '.join(titles)}"
+        return line
+
+    facts = "\n".join(_fact_line(m) for m in matches)
     skills = ", ".join(profile.get("skills", [])[:10]) or "not specified"
     target_roles = ", ".join(profile.get("target_roles", [])) or "not specified"
 
@@ -104,6 +136,6 @@ Below is the ONLY set of companies retrieved as relevant matches. You must not m
 RETRIEVED COMPANIES:
 {facts}
 
-For each company, write one short sentence on why it could be a fit for this search and profile, based only on the sector/location shown above and the candidate's stated skills/roles. Keep the whole answer under 150 words."""
+For each company, write one short sentence on why it could be a fit for this search and profile, based only on the sector/location/currently-hiring roles shown above and the candidate's stated skills/roles. If a company lists currently-hiring roles, prefer citing the specific matching role over a generic sector-fit claim. Keep the whole answer under 150 words."""
 
     return _claude(prompt, max_tokens=500, fast=True)
