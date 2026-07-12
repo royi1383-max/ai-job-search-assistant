@@ -2,6 +2,7 @@ import re
 import json
 import os
 import html as _html
+import concurrent.futures
 import requests
 import streamlit as st
 from datetime import datetime, timedelta
@@ -396,6 +397,20 @@ COMEET_BOARDS = [
     ("widget", "94.009", "49916FD16FD24C89320DCB296116FD2961"),   # Tailor Brands
     ("widget", "E5.000", "5E02340002F0017800234011A01780"),       # Gloat
     ("widget", "A3.00F", "3AF126BB0D161A3AF161A00B0D126B"),       # Elementor
+    ("widget", "10.000", "1030901050040401080"),                 # Guesty
+    ("widget", "32.00E", "23E8F811F0B360FB20142E8F8142E"),        # Crazy Labs
+    ("url", "earnix", "93.00B"),
+    ("widget", "63.00B", "36B11176D614826D66D611171482DAC17ED"),  # Atera
+    ("url", "blinkops", "C7.004"),
+    ("url", "evinced", "28.000"),
+    ("url", "ironscales", "1A.007"),
+    ("url", "reco", "3A.00D"),
+    ("widget", "71.000", "1705C07307305C04508A02E07302E0"),       # SundaySky
+    ("widget", "56.007", "657260A657195C1FB332B8390F195C6571305"), # Swimm
+    ("url", "bigabid", "A4.003"),
+    ("widget", "22.00A", "22A8A81150454CFC115022AAD2F26137A"),    # Skai
+    ("url", "trigo", "A6.005"),
+    ("url", "papayaglobal", "16.005"),
 ]
 
 
@@ -683,83 +698,46 @@ def search_jobs(
         drushim_loc = loc_clean
         li_loc = loc_clean
 
-    results = []
+    # Build one zero-arg fetch task per board/query across every selected
+    # source, then run them all concurrently. Sequentially, ~30 Greenhouse +
+    # 23 Comeet + 5 Ashby boards alone meant 50+ round trips before a single
+    # AllJobs/Drushim/JobMaster/LinkedIn query even started — that's what was
+    # making searches take minutes. Filtering is source-agnostic (it only
+    # looks at each job's own fields), so it's applied once on the merged
+    # results instead of per-source.
+    fetch_tasks: list = []
 
-    # Greenhouse & Lever: fetch each board ONCE (cached), filter locally — avoids N_boards × N_queries requests
     if "Greenhouse" in sources:
-        gh_jobs = []
-        for board in GREENHOUSE_BOARDS:
-            gh_jobs.extend(_fetch_greenhouse(board))
-        gh_jobs = _filter_by_location(gh_jobs, loc_clean)
-        gh_jobs = _filter_by_experience(gh_jobs, exp_level)
-        results.extend(gh_jobs)
-
+        fetch_tasks += [lambda b=board: _fetch_greenhouse(b) for board in GREENHOUSE_BOARDS]
     if "Lever" in sources:
-        lv_jobs = []
-        for board in LEVER_BOARDS:
-            lv_jobs.extend(_fetch_lever(board))
-        lv_jobs = _filter_by_location(lv_jobs, loc_clean)
-        lv_jobs = _filter_by_experience(lv_jobs, exp_level)
-        results.extend(lv_jobs)
-
+        fetch_tasks += [lambda b=board: _fetch_lever(b) for board in LEVER_BOARDS]
     if "SmartRecruiters" in sources:
-        sr_jobs = []
-        for board in SMARTRECRUITERS_BOARDS:
-            sr_jobs.extend(_fetch_smartrecruiters(board))
-        sr_jobs = _filter_by_location(sr_jobs, loc_clean)
-        sr_jobs = _filter_by_experience(sr_jobs, exp_level)
-        results.extend(sr_jobs)
-
+        fetch_tasks += [lambda b=board: _fetch_smartrecruiters(b) for board in SMARTRECRUITERS_BOARDS]
     if "Comeet" in sources:
-        cm_jobs = []
-        for kind, a, b in COMEET_BOARDS:
-            cm_jobs.extend(_fetch_comeet(kind, a, b))
-        cm_jobs = _filter_by_location(cm_jobs, loc_clean)
-        cm_jobs = _filter_by_experience(cm_jobs, exp_level)
-        results.extend(cm_jobs)
-
+        fetch_tasks += [lambda k=kind, a=a, b=b: _fetch_comeet(k, a, b) for kind, a, b in COMEET_BOARDS]
     if "Ashby" in sources:
-        ab_jobs = []
-        for board in ASHBY_BOARDS:
-            ab_jobs.extend(_fetch_ashby(board))
-        ab_jobs = _filter_by_location(ab_jobs, loc_clean)
-        ab_jobs = _filter_by_experience(ab_jobs, exp_level)
-        results.extend(ab_jobs)
-
-    # LinkedIn: one request per query; filter location locally too (server-side geo is imprecise)
+        fetch_tasks += [lambda b=board: _fetch_ashby(b) for board in ASHBY_BOARDS]
     if "LinkedIn" in sources:
-        li_raw = []
-        for query in queries:
-            li_raw.extend(_fetch_linkedin(query, li_loc))
-        li_raw = _filter_by_location(li_raw, loc_clean)
-        results.extend(li_raw)
-
-    # AllJobs: one request per query; source already applies city/experience server-side
+        fetch_tasks += [lambda q=query: _fetch_linkedin(q, li_loc) for query in queries]
     if "AllJobs" in sources:
-        aj_jobs = []
-        for query in queries:
-            aj_jobs.extend(_fetch_alljobs(query, alljobs_loc, alljobs_exp))
-        aj_jobs = _filter_by_location(aj_jobs, loc_clean)
-        aj_jobs = _filter_by_experience(aj_jobs, exp_level)
-        results.extend(aj_jobs)
-
-    # Drushim: one request per query; source already applies city/experience server-side
+        fetch_tasks += [lambda q=query: _fetch_alljobs(q, alljobs_loc, alljobs_exp) for query in queries]
     if "Drushim" in sources:
-        dr_jobs = []
-        for query in queries:
-            dr_jobs.extend(_fetch_drushim(query, drushim_loc, drushim_exp))
-        dr_jobs = _filter_by_location(dr_jobs, loc_clean)
-        dr_jobs = _filter_by_experience(dr_jobs, exp_level)
-        results.extend(dr_jobs)
-
-    # JobMaster: one request per query; no server-side experience filter available
+        fetch_tasks += [lambda q=query: _fetch_drushim(q, drushim_loc, drushim_exp) for query in queries]
     if "JobMaster" in sources:
-        jm_jobs = []
-        for query in queries:
-            jm_jobs.extend(_fetch_jobmaster(query, alljobs_loc))
-        jm_jobs = _filter_by_location(jm_jobs, loc_clean)
-        jm_jobs = _filter_by_experience(jm_jobs, exp_level)
-        results.extend(jm_jobs)
+        fetch_tasks += [lambda q=query: _fetch_jobmaster(q, alljobs_loc) for query in queries]
+
+    results = []
+    if fetch_tasks:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            for jobs in executor.map(lambda fn: fn(), fetch_tasks):
+                results.extend(jobs)
+
+    # LinkedIn never got the experience filter (no reliable client-side
+    # signal for it) — preserve that distinction from before parallelization.
+    li_jobs = _filter_by_location([j for j in results if j.get("source") == "LinkedIn"], loc_clean)
+    other_jobs = _filter_by_location([j for j in results if j.get("source") != "LinkedIn"], loc_clean)
+    other_jobs = _filter_by_experience(other_jobs, exp_level)
+    results = other_jobs + li_jobs
 
     # Deduplicate by id
     seen: set[str] = set()
