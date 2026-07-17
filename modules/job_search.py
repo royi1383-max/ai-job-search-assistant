@@ -805,91 +805,15 @@ def explain_match(job: dict, profile: dict) -> tuple[list[str], list[str]]:
     return strengths[:8], gaps[:5]
 
 
-# ── Smart fit analysis (Claude) ───────────────────────────────────────────────
-
-def analyze_fit(job: dict, profile: dict, lang: str) -> dict:
-    """Deep fit analysis for one job. Rubric: dealbreakers → required (70%) →
-    preferred (30%) → red-flag scan. Returns {} on failure."""
-    from modules.career_advisor import _claude, _extract_json
-
-    lang_name = "Hebrew" if lang == "he" else "English"
-    skills = ", ".join(profile.get("skills", [])[:15]) or "not specified"
-    roles = ", ".join(profile.get("target_roles", [])) or "not specified"
-    exp = profile.get("experience_text", "")[:1500]
-    salary_min = profile.get("salary_min") or "not specified"
-
-    prompt = f"""You are a job-fit analyst. Evaluate the candidate against the job using this rubric, in order:
-
-1. DEALBREAKERS first → verdict "Skip": location clearly incompatible with the Tel Aviv metro area
-   (unless remote); salary stated and clearly below {salary_min} ILS/month; seniority mismatch of 2+
-   levels (e.g. Director role for a mid-level candidate); required license/clearance the candidate lacks.
-2. Extract Required vs Preferred requirements from the description
-   ("must", "required", listed under Requirements, or mentioned 3+ times → Required;
-   "nice to have", "bonus", "preferred", "advantage" → Preferred).
-3. match_pct = round(70 * fraction_of_required_met + 30 * fraction_of_preferred_met).
-4. Verdict: "High" = no dealbreakers, all required met, 2+ preferred met;
-   "Medium" = most required met; "Low" = significant required gaps; "Skip" = dealbreaker hit.
-5. Red flags — scan the description for: "wear many hats", "fast-paced environment",
-   "hit the ground running", "rockstar/ninja/guru", "work hard play hard", "like a family",
-   "unlimited vacation", "competitive salary" with no actual range, commission-heavy pay.
-
-JOB: {job.get('title', '')} at {job.get('company', '')}
-LOCATION: {job.get('location', '')}
-DESCRIPTION: {(job.get('description') or '')[:2500]}
-
-CANDIDATE — target roles: {roles}; skills: {skills}
-EXPERIENCE: {exp}
-
-Write all string values in {lang_name}; keep JSON keys in English. Return ONLY this JSON:
-{{"verdict": "High|Medium|Low|Skip", "match_pct": <int 0-100>, "strengths": ["...", "...", "..."],
-"gaps": ["..."], "red_flags": ["..."], "advice": "<1-2 sentences: how to apply / what to emphasize>"}}"""
-
-    raw = _claude(prompt, max_tokens=900, fast=False)
-    return _extract_json(raw)
-
-
-_VERDICT_STYLE = {
-    "High":   ("match-high",   "🟢"),
-    "Medium": ("match-medium", "🟡"),
-    "Low":    ("match-low",    "🟠"),
-    "Skip":   ("match-low",    "🔴"),
-}
-
-
-def _render_fit_result(fit: dict, lang: str) -> None:
-    cls, dot = _VERDICT_STYLE.get(fit.get("verdict", ""), ("match-low", "⚪"))
-    verdict = _html.escape(str(fit.get("verdict", "?")))
-    pct = int(fit.get("match_pct") or 0)
-    st.markdown(
-        f'<div style="margin-bottom:0.5rem">{dot} '
-        f'<span class="{cls}" style="font-size:1.2rem">{verdict}</span>'
-        f'&nbsp;·&nbsp;<span style="color:#e6edf3;font-weight:600">{pct}%</span></div>',
-        unsafe_allow_html=True,
-    )
-    if fit.get("strengths"):
-        st.markdown(
-            ("💪 " if lang == "he" else "💪 ")
-            + " ".join(f'<span class="skill-tag tag-green">{_html.escape(str(s))}</span>'
-                       for s in fit["strengths"][:5]),
-            unsafe_allow_html=True,
-        )
-    if fit.get("gaps"):
-        st.markdown(
-            ("פערים: " if lang == "he" else "Gaps: ")
-            + " ".join(f'<span class="skill-tag tag-red">{_html.escape(str(g))}</span>'
-                       for g in fit["gaps"][:5]),
-            unsafe_allow_html=True,
-        )
-    for rf in (fit.get("red_flags") or [])[:4]:
-        st.markdown(f"⚠️ {rf}")
-    if fit.get("advice"):
-        st.info("💡 " + str(fit["advice"]))
-
-
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 def _strip_html(html: str) -> str:
-    clean = re.sub(r'<[^>]+>', ' ', html)
+    # Some ATS boards (e.g. Greenhouse) return content that's already HTML-entity
+    # encoded (literal "&lt;p&gt;" text, not real "<p>" tags) — unescape first so
+    # the tag-stripping regex actually has real tags to match.
+    clean = _html.unescape(html)
+    clean = re.sub(r'<[^>]+>', ' ', clean)
+    clean = _html.unescape(clean)
     clean = re.sub(r'\s+', ' ', clean)
     return clean.strip()
 
@@ -959,10 +883,8 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
                         )
 
         uid = job.get("id", abs(hash(job.get("url", "") + job.get("title", ""))))
-        from config import ANTHROPIC_API_KEY
-        has_claude = bool(ANTHROPIC_API_KEY) and ANTHROPIC_API_KEY != "your_key_here"
 
-        c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
+        c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
             if st.button("📄 " + ("קו\"ח" if lang == "he" else "Build CV"),
                          key=f"{key_prefix}cv_{uid}"):
@@ -977,29 +899,11 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
                 _add_to_tracker(job)
                 st.toast("✅ " + ("נשמר!" if lang == "he" else "Saved!"))
         with c3:
-            if st.button("🎯 " + ("נתח התאמה" if lang == "he" else "Analyze Fit"),
-                         key=f"{key_prefix}fit_{uid}", disabled=not has_claude):
-                fit_cache = st.session_state.setdefault("fit_cache", {})
-                if not fit_cache.get(uid):  # empty/failed results retryable
-                    with st.spinner("מנתח התאמה..." if lang == "he" else "Analyzing fit..."):
-                        result = analyze_fit(job, st.session_state.get("profile", {}), lang)
-                        if result:
-                            fit_cache[uid] = result
-                        else:
-                            st.warning("⚠️ " + ("הניתוח נכשל — נסה שוב."
-                                                if lang == "he" else "Analysis failed — try again."))
-        with c4:
             if job.get("url"):
                 st.link_button(
                     "🚀 " + ("הגש מועמדות" if lang == "he" else "Apply Now"),
                     url=job["url"],
                 )
-
-        fit = st.session_state.get("fit_cache", {}).get(uid)
-        if fit:
-            with st.expander("🎯 " + ("ניתוח התאמה" if lang == "he" else "Fit Analysis"),
-                             expanded=True):
-                _render_fit_result(fit, lang)
 
 
 def render(lang: str):
