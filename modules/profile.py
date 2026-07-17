@@ -27,27 +27,25 @@ def get_skills_list(profile: dict) -> list[str]:
 
 # ── CV parsing ───────────────────────────────────────────────────────────────
 
-def parse_cv_pdf(path: str) -> dict:
-    """Extract structured data from a PDF CV using PyMuPDF."""
+def _pdf_text(path: str) -> str:
     try:
         import fitz  # PyMuPDF
     except ImportError:
-        return {}
+        return ""
     try:
         doc = fitz.open(path)
         text = "\n".join(page.get_text() for page in doc)
         doc.close()
+        return text
     except Exception:
-        return {}
-    return _extract_fields(text)
+        return ""
 
 
-def parse_cv_docx(path: str) -> dict:
-    """Extract structured data from a DOCX CV using python-docx."""
+def _docx_text(path: str) -> str:
     try:
         from docx import Document
     except ImportError:
-        return {}
+        return ""
     try:
         doc = Document(path)
         paragraphs = []
@@ -62,17 +60,87 @@ def parse_cv_docx(path: str) -> dict:
                     t = cell.text.strip()
                     if t and t not in paragraphs:
                         paragraphs.append(t)
-        text = "\n".join(paragraphs)
+        return "\n".join(paragraphs)
     except Exception:
-        return {}
-    return _extract_fields(text)
+        return ""
+
+
+def extract_cv_text(path: str) -> str:
+    """Route to PDF or DOCX text extraction based on extension."""
+    if path.lower().endswith(".docx"):
+        return _docx_text(path)
+    return _pdf_text(path)
+
+
+def parse_cv_pdf(path: str) -> dict:
+    """Extract structured data from a PDF CV using regex heuristics."""
+    return _extract_fields(_pdf_text(path))
+
+
+def parse_cv_docx(path: str) -> dict:
+    """Extract structured data from a DOCX CV using regex heuristics."""
+    return _extract_fields(_docx_text(path))
 
 
 def parse_cv_file(path: str) -> dict:
-    """Route to PDF or DOCX parser based on extension."""
-    if path.lower().endswith(".docx"):
-        return parse_cv_docx(path)
-    return parse_cv_pdf(path)
+    """Route to PDF or DOCX parser based on extension (regex heuristics)."""
+    return _extract_fields(extract_cv_text(path))
+
+
+def ai_extract_fields(text: str, lang: str = "en") -> dict:
+    """Have Claude read the full CV text and return a structured profile.
+    Far more reliable than the regex heuristics below — understands context
+    (e.g. which block is "Education" vs "Experience") instead of pattern-matching.
+    Returns {} on failure or if no API key is configured."""
+    from modules.career_advisor import _claude, _extract_json
+
+    if not text.strip():
+        return {}
+
+    lang_name = "Hebrew" if lang == "he" else "English"
+    prompt = f"""Extract structured profile data from this CV/resume text. Only include
+fields you can actually find evidence for — never invent or guess missing info
+(e.g. no email if none is present). Write summary/experience_text/education in
+{lang_name} if the source uses a different language than that, translate; if
+it already matches, keep the original wording.
+
+CV TEXT:
+{text[:8000]}
+
+Return ONLY this JSON (omit keys you found no evidence for):
+{{
+  "name": "full name",
+  "email": "...",
+  "phone": "...",
+  "linkedin": "https://linkedin.com/in/...",
+  "location": "city",
+  "summary": "2-3 sentence professional summary synthesized from the CV",
+  "experience_text": "One role per line: Role | Company | Start | End | 1-2 line description — covering every role found, most recent first",
+  "education": "degree, institution, year — one per line",
+  "military": "military/national service line if present",
+  "skills": ["...", "..."],
+  "certifications": "one per line",
+  "languages": "e.g. Hebrew (Native), English (Fluent)"
+}}"""
+
+    raw = _claude(prompt, max_tokens=2000, fast=False)
+    data = _extract_json(raw)
+    # Drop empty/whitespace-only values and non-list "skills" garbage
+    return {
+        k: v for k, v in data.items()
+        if v and not (isinstance(v, str) and not v.strip())
+    }
+
+
+def parse_cv_file_smart(path: str, lang: str = "en") -> dict:
+    """AI extraction when Claude is configured, regex heuristics otherwise."""
+    from config import ANTHROPIC_API_KEY
+    text = extract_cv_text(path)
+    if ANTHROPIC_API_KEY and ANTHROPIC_API_KEY != "your_key_here":
+        result = ai_extract_fields(text, lang)
+        if result:
+            return result
+    return _extract_fields(text)
 
 
 def _extract_fields(text: str) -> dict:
@@ -154,6 +222,10 @@ def list_cv_files() -> list[str]:
 def render(lang: str):
     rtl = "rtl" if lang == "he" else "ltr"
     profile = st.session_state.profile.copy()
+    # Snapshot before tabs 0-3 backfill placeholder defaults (e.g. demo skills
+    # list) into `profile` — Tab 4's "only fill empty fields" import check must
+    # compare against what was actually saved, not against those defaults.
+    original_profile = dict(profile)
 
     title = "👤 הפרופיל שלי" if lang == "he" else "👤 My Profile"
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
@@ -317,6 +389,34 @@ def render(lang: str):
         import_title = "ייבוא מקו\"ח קיים" if lang == "he" else "Import from Existing CV"
         st.markdown(f"**{import_title}**")
 
+        from config import ANTHROPIC_API_KEY
+        has_claude = bool(ANTHROPIC_API_KEY) and ANTHROPIC_API_KEY != "your_key_here"
+        st.caption(
+            ("Claude יקרא את הקו\"ח ויבין הקשר (תפקידים/השכלה/כישורים) — לא רק חיפוש מילות מפתח."
+             if has_claude else
+             "⚠️ ANTHROPIC_API_KEY לא מוגדר — ייבוא בסיסי בלבד (חיפוש מילות מפתח, פחות מדויק).")
+            if lang == "he" else
+            ("Claude reads the CV and understands context (roles/education/skills) — not just "
+             "keyword matching." if has_claude else
+             "⚠️ ANTHROPIC_API_KEY not set — falling back to basic keyword-matching import (less accurate).")
+        )
+
+        imported_msg = st.session_state.pop("_cv_import_result", None)
+        if imported_msg:
+            fields_str = ", ".join(imported_msg) if imported_msg else "—"
+            st.success("✅ " + ("יובאו (שמור אוטומטית): " + fields_str if lang == "he"
+                                else "Imported (auto-saved): " + fields_str))
+
+        def _apply_import(parsed: dict) -> list[str]:
+            imported = []
+            for k, v in parsed.items():
+                if k not in original_profile or not original_profile[k]:
+                    profile[k] = v
+                    imported.append(k)
+            if imported:
+                save_profile(profile)
+            return imported
+
         cv_files = list_cv_files()
         if cv_files:
             # Show all CV files (PDF + DOCX), grouped by type indicator
@@ -341,16 +441,11 @@ def render(lang: str):
 
             if do_import and chosen:
                 path = os.path.join(CV_FOLDER, chosen)
-                parsed = parse_cv_file(path)
+                with st.spinner("קורא קו\"ח..." if lang == "he" else "Reading CV..."):
+                    parsed = parse_cv_file_smart(path, lang)
                 if parsed:
-                    imported = []
-                    for k, v in parsed.items():
-                        if k not in profile or not profile[k]:
-                            profile[k] = v
-                            imported.append(k)
-                    fields_str = ", ".join(imported) if imported else "—"
-                    st.success("✅ " + ("יובאו: " + fields_str if lang == "he"
-                                        else "Imported: " + fields_str))
+                    st.session_state["_cv_import_result"] = _apply_import(parsed)
+                    st.rerun()
                 else:
                     st.warning("לא הצלחנו לחלץ פרטים. נסה קובץ אחר." if lang == "he"
                                else "Could not extract details. Try another file.")
@@ -360,20 +455,24 @@ def render(lang: str):
 
         st.markdown("---")
         upload_label = "או גרור קובץ חדש" if lang == "he" else "Or upload a new file"
-        uploaded = st.file_uploader(upload_label, type=["pdf", "docx"])
+        uploaded = st.file_uploader(upload_label, type=["pdf", "docx"], key="cv_upload")
         if uploaded:
-            import tempfile
-            suffix = "." + uploaded.name.rsplit(".", 1)[-1].lower()
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(uploaded.read())
-                tmp_path = tmp.name
-            parsed = parse_cv_file(tmp_path)
-            os.unlink(tmp_path)
-            if parsed:
-                for k, v in parsed.items():
-                    if k not in profile or not profile[k]:
-                        profile[k] = v
-                st.success("✅ " + ("יובא!" if lang == "he" else "Imported!"))
+            upload_btn = "📥 " + ("ייבא מהקובץ שהועלה" if lang == "he" else "Import from uploaded file")
+            if st.button(upload_btn, type="primary", key="import_uploaded_btn"):
+                import tempfile
+                suffix = "." + uploaded.name.rsplit(".", 1)[-1].lower()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(uploaded.getvalue())
+                    tmp_path = tmp.name
+                with st.spinner("קורא קו\"ח..." if lang == "he" else "Reading CV..."):
+                    parsed = parse_cv_file_smart(tmp_path, lang)
+                os.unlink(tmp_path)
+                if parsed:
+                    st.session_state["_cv_import_result"] = _apply_import(parsed)
+                    st.rerun()
+                else:
+                    st.warning("לא הצלחנו לחלץ פרטים. נסה קובץ אחר." if lang == "he"
+                               else "Could not extract details. Try another file.")
 
     # ── Save button ───────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
