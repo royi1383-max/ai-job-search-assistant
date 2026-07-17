@@ -44,27 +44,6 @@ def _to_int(v, default: int = 0) -> int:
         return default
 
 
-def get_interview_questions(role: str, company: str, profile: dict) -> list[dict]:
-    skills = ", ".join(profile.get("skills", [])[:10])
-    exp = profile.get("experience_text", "")[:800]
-
-    prompt = f"""Generate 8 targeted interview questions for:
-Role: {role}
-Company: {company}
-
-Candidate background:
-- Skills: {skills}
-- Experience snippet: {exp}
-
-For each question provide: question, why_asked (1 sentence), suggested_answer_tip (2-3 sentences using the candidate's actual experience).
-
-Return JSON array: [{{"question":"...","why_asked":"...","tip":"..."}}]
-Return JSON only."""
-
-    raw = _claude(prompt, max_tokens=1500, fast=False)
-    return _extract_json(raw, kind="array")
-
-
 def generate_interview_prep(app: dict, profile: dict, lang: str) -> str:
     """Full interview prep guide (markdown) for a tracked application."""
     title = app.get("title", "")
@@ -257,41 +236,14 @@ def render(lang: str):
                              else "Set ANTHROPIC_API_KEY in .env to use the Career Advisor."))
 
     tabs_labels = (
-        ["הכנה לריאיון", "פערי כישורים", "מחקר שכר", "מה ללמוד"]
+        ["פערי כישורים", "מחקר שכר", "מה ללמוד"]
         if lang == "he"
-        else ["Interview Prep", "Skill Gap", "Salary Research", "What to Learn"]
+        else ["Skill Gap", "Salary Research", "What to Learn"]
     )
     tabs = st.tabs(tabs_labels)
 
-    # ── Tab 0: Interview Prep ─────────────────────────────────────────────────
+    # ── Tab 0: Skill Gap ──────────────────────────────────────────────────────
     with tabs[0]:
-        c1, c2 = st.columns(2)
-        with c1:
-            role_input = st.text_input(
-                "תפקיד" if lang == "he" else "Role",
-                value=(profile.get("target_roles") or ["Data Analyst"])[0],
-            )
-        with c2:
-            company_input = st.text_input(
-                "חברה" if lang == "he" else "Company",
-                value="monday.com",
-            )
-
-        prep_label = "🎤 " + ("הכן שאלות ריאיון" if lang == "he" else "Generate Interview Questions")
-        if st.button(prep_label, type="primary", disabled=not has_claude):
-            with st.spinner("מכין שאלות..." if lang == "he" else "Preparing questions..."):
-                questions = get_interview_questions(role_input, company_input, profile)
-                st.session_state.interview_questions = questions
-
-        questions = st.session_state.get("interview_questions", [])
-        if questions:
-            for i, q in enumerate(questions, 1):
-                with st.expander(f"Q{i}: {q.get('question', '')}"):
-                    st.markdown(f"**{'למה שואלים' if lang == 'he' else 'Why asked'}:** {q.get('why_asked', '')}")
-                    st.markdown(f"**{'טיפ לתשובה' if lang == 'he' else 'Answer tip'}:** {q.get('tip', '')}")
-
-    # ── Tab 1: Skill Gap ──────────────────────────────────────────────────────
-    with tabs[1]:
         jd_for_gap = st.text_area(
             "תיאור משרה" if lang == "he" else "Job Description",
             height=150,
@@ -340,8 +292,8 @@ def render(lang: str):
                 for w in quick_wins:
                     st.markdown(f"• {w}")
 
-    # ── Tab 2: Salary ─────────────────────────────────────────────────────────
-    with tabs[2]:
+    # ── Tab 1: Salary ─────────────────────────────────────────────────────────
+    with tabs[1]:
         st.caption(
             "טווחי השכר מחושבים לפי הפרופיל שלך + סוג החברה הספציפי — לא ממוצע שוק גנרי"
             if lang == "he"
@@ -416,17 +368,27 @@ def render(lang: str):
                     st.warning("⚠️ " + ("שכר החציון נמוך מהמינימום שלך לתפקיד זה." if lang == "he"
                                         else "Median market rate is below your minimum for this role."))
 
-    # ── Tab 3: What to Learn ──────────────────────────────────────────────────
-    with tabs[3]:
+    # ── Tab 2: What to Learn ──────────────────────────────────────────────────
+    with tabs[2]:
         recent_jobs = st.session_state.get("job_results", [])
+        # Some sources (e.g. LinkedIn) never return a description — a title-only
+        # entry just dilutes the trend signal, so drop those before combining.
+        described_jobs = [j for j in recent_jobs if len((j.get("description") or "")) >= 80]
         learn_label = "📚 " + ("מה כדאי ללמוד?" if lang == "he" else "What Should I Learn?")
 
         if st.button(learn_label, type="primary", disabled=not has_claude):
             if not recent_jobs:
                 st.info("חפש משרות קודם כדי לנתח מגמות." if lang == "he"
                         else "Search for jobs first to analyze trends.")
+            elif len(described_jobs) < 3:
+                st.warning(
+                    "רוב המשרות שנמצאו בלי תיאור מפורט — נסה חיפוש עם יותר תוצאות ממקורות עשירים "
+                    "(Greenhouse/Lever/Comeet/Ashby) לפני ניתוח מגמות." if lang == "he" else
+                    "Most search results have no real description — try a search that pulls more "
+                    "results from richer sources (Greenhouse/Lever/Comeet/Ashby) before analyzing trends."
+                )
             else:
-                combined_jds = " ".join(j.get("description", "")[:200] for j in recent_jobs[:20])
+                combined_jds = " ".join(j.get("description", "")[:200] for j in described_jobs[:20])
                 skills = ", ".join(profile.get("skills", []))
 
                 prompt = f"""Based on these job descriptions (combined):

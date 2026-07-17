@@ -588,48 +588,6 @@ def render(lang: str):
                 toggle_follow(name)
                 st.rerun()
 
-    # ── Smart company match (RAG) ──────────────────────────────────────────────
-    from modules.company_search import semantic_search, explain_matches
-
-    st.markdown("---")
-    smart_header = "🧭 התאמת חברות חכמה" if lang == "he" else "🧭 Smart Company Match"
-    st.markdown(f"#### {smart_header}")
-    st.caption(
-        "חיפוש סמנטי (embeddings) על פני מאגר החברות, ואז Claude מסביר את ההתאמות — מבוסס רק על מה שאוחזר, לא המצאה."
-        if lang == "he"
-        else "Semantic search (embeddings) over the company directory, then Claude explains the matches — grounded only in what was retrieved, not invented."
-    )
-    smart_query = st.text_input(
-        "smart_query",
-        placeholder=(
-            "לדוגמה: 'סטארטאפ פינטק בצמיחה עם תרבות טובה'"
-            if lang == "he"
-            else "e.g. 'fast-growing fintech startup with good culture'"
-        ),
-        label_visibility="collapsed",
-        key="smart_company_query",
-    )
-    if st.button("🔍 " + ("חפש התאמות" if lang == "he" else "Find Matches"),
-                 disabled=not smart_query.strip(), key="smart_search_btn"):
-        with st.spinner("Searching..." if lang == "en" else "מחפש..."):
-            matches = semantic_search(smart_query, top_k=8)
-            st.session_state["smart_matches"] = matches
-            st.session_state["smart_explanation"] = explain_matches(
-                smart_query, profile, matches
-            )
-
-    smart_matches = st.session_state.get("smart_matches")
-    if smart_matches:
-        method = smart_matches[0].get("retrieval_method", "embeddings")
-        st.caption(f"Retrieval method: {method}")
-        explanation = st.session_state.get("smart_explanation", "")
-        if explanation:
-            st.info(explanation)
-        smart_cols = st.columns(2)
-        for i, m in enumerate(smart_matches):
-            with smart_cols[i % 2]:
-                _company_card(m, f"smart_{i}")
-
     st.markdown("---")
 
     # ── Sector tabs ───────────────────────────────────────────────────────────
