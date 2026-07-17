@@ -5,7 +5,7 @@ load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-CV_FOLDER = os.path.join(os.path.dirname(__file__), "resumes")
+CV_FOLDER = os.path.join(os.path.dirname(__file__), "קורות חיים-Royi")
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 TEMPLATES_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
