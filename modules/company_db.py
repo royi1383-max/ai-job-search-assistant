@@ -1,10 +1,10 @@
 import json
 import os
+import html as _html
 import requests
 import streamlit as st
 from datetime import datetime
 from urllib.parse import quote
-from itertools import groupby
 
 from config import (
     DATA_DIR, JOB_SEARCH_CACHE_TTL,
@@ -546,12 +546,15 @@ def render(lang: str):
         api_badge  = (" <span style='font-size:0.65rem;color:#2563eb'>● API</span>"
                       if has_api else "")
 
+        name_esc = _html.escape(name)
+        he_esc = _html.escape(he_name or "")
+        loc_esc = _html.escape(location or "—")
         st.markdown(f"""
         <div class="job-card" style="padding:0.8rem;margin-bottom:0.4rem">
-            <b style="color:#e6edf3;font-size:0.88rem">{name}</b>{api_badge}
-            {"<br><span style='color:#8b949e;font-size:0.75rem'>" + he_name + "</span>" if he_name and he_name != name else ""}
+            <b style="color:#e6edf3;font-size:0.88rem">{name_esc}</b>{api_badge}
+            {"<br><span style='color:#8b949e;font-size:0.75rem'>" + he_esc + "</span>" if he_name and he_name != name else ""}
             <br>
-            <span style="color:{loc_color};font-size:0.75rem">📍 {location or '—'}</span>
+            <span style="color:{loc_color};font-size:0.75rem">📍 {loc_esc}</span>
             {"&nbsp;·&nbsp;<span style='color:" + jobs_color + ";font-size:0.75rem'>📋 " + str(active) + "</span>" if active else ""}
         </div>""", unsafe_allow_html=True)
 

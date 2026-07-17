@@ -34,11 +34,6 @@ SOURCE_COLORS = {
     "Ashby":      "#7c3aed",
 }
 
-LOCATION_PRESETS = [
-    "🏙️ Center (TLV Area)", "All Israel", "Tel Aviv", "Remote",
-    "Herzliya", "Ra'anana", "Haifa", "Jerusalem", "Beer Sheva", "Custom...",
-]
-
 CENTER_CITIES = [
     "tel aviv", "תל אביב", "tlv",
     "givatayim", "גבעתיים",
@@ -763,16 +758,38 @@ def search_jobs(
 
 # ── Match scoring ─────────────────────────────────────────────────────────────
 
+# Plain substring matching made short skills match everything ("R" is inside
+# almost any description, "Excel" inside "excellent") and parenthesized skills
+# like "SQL (Advanced)" match nothing. Normalize to the core term and require
+# word boundaries instead.
+_skill_pat_cache: dict[str, "re.Pattern | None"] = {}
+
+
+def _skill_pattern(skill: str):
+    if skill not in _skill_pat_cache:
+        core = re.sub(r"\s*\(.*?\)\s*", " ", skill).strip().lower()
+        _skill_pat_cache[skill] = (
+            re.compile(r"(?<!\w)" + re.escape(core) + r"(?!\w)", re.IGNORECASE)
+            if core else None
+        )
+    return _skill_pat_cache[skill]
+
+
+def _skill_in(skill: str, text: str) -> bool:
+    pat = _skill_pattern(skill)
+    return bool(pat and pat.search(text))
+
+
 def score_job(job: dict, profile: dict) -> float:
-    text = (job.get("title", "") + " " + job.get("description", "")).lower()
-    skills = [s.lower() for s in profile.get("skills", [])]
-    roles = [r.lower() for r in profile.get("target_roles", [])]
+    text = job.get("title", "") + " " + job.get("description", "")
+    skills = profile.get("skills", [])
+    roles = profile.get("target_roles", [])
 
     if not skills and not roles:
         return 0.5
 
-    skill_hits = sum(1 for s in skills if s in text)
-    role_hits = sum(1 for r in roles if r in text)
+    skill_hits = sum(1 for s in skills if _skill_in(s, text))
+    role_hits = sum(1 for r in roles if _skill_in(r, text))
 
     skill_score = min(skill_hits / max(len(skills), 1), 1.0)
     role_score = min(role_hits * 2 / max(len(roles), 1), 1.0)
@@ -781,11 +798,92 @@ def score_job(job: dict, profile: dict) -> float:
 
 
 def explain_match(job: dict, profile: dict) -> tuple[list[str], list[str]]:
-    text = (job.get("title", "") + " " + job.get("description", "")).lower()
+    text = job.get("title", "") + " " + job.get("description", "")
     skills = profile.get("skills", [])
-    strengths = [s for s in skills if s.lower() in text]
-    gaps = [s for s in skills if s.lower() not in text]
+    strengths = [s for s in skills if _skill_in(s, text)]
+    gaps = [s for s in skills if not _skill_in(s, text)]
     return strengths[:8], gaps[:5]
+
+
+# ── Smart fit analysis (Claude) ───────────────────────────────────────────────
+
+def analyze_fit(job: dict, profile: dict, lang: str) -> dict:
+    """Deep fit analysis for one job. Rubric: dealbreakers → required (70%) →
+    preferred (30%) → red-flag scan. Returns {} on failure."""
+    from modules.career_advisor import _claude, _extract_json
+
+    lang_name = "Hebrew" if lang == "he" else "English"
+    skills = ", ".join(profile.get("skills", [])[:15]) or "not specified"
+    roles = ", ".join(profile.get("target_roles", [])) or "not specified"
+    exp = profile.get("experience_text", "")[:1500]
+    salary_min = profile.get("salary_min") or "not specified"
+
+    prompt = f"""You are a job-fit analyst. Evaluate the candidate against the job using this rubric, in order:
+
+1. DEALBREAKERS first → verdict "Skip": location clearly incompatible with the Tel Aviv metro area
+   (unless remote); salary stated and clearly below {salary_min} ILS/month; seniority mismatch of 2+
+   levels (e.g. Director role for a mid-level candidate); required license/clearance the candidate lacks.
+2. Extract Required vs Preferred requirements from the description
+   ("must", "required", listed under Requirements, or mentioned 3+ times → Required;
+   "nice to have", "bonus", "preferred", "advantage" → Preferred).
+3. match_pct = round(70 * fraction_of_required_met + 30 * fraction_of_preferred_met).
+4. Verdict: "High" = no dealbreakers, all required met, 2+ preferred met;
+   "Medium" = most required met; "Low" = significant required gaps; "Skip" = dealbreaker hit.
+5. Red flags — scan the description for: "wear many hats", "fast-paced environment",
+   "hit the ground running", "rockstar/ninja/guru", "work hard play hard", "like a family",
+   "unlimited vacation", "competitive salary" with no actual range, commission-heavy pay.
+
+JOB: {job.get('title', '')} at {job.get('company', '')}
+LOCATION: {job.get('location', '')}
+DESCRIPTION: {(job.get('description') or '')[:2500]}
+
+CANDIDATE — target roles: {roles}; skills: {skills}
+EXPERIENCE: {exp}
+
+Write all string values in {lang_name}; keep JSON keys in English. Return ONLY this JSON:
+{{"verdict": "High|Medium|Low|Skip", "match_pct": <int 0-100>, "strengths": ["...", "...", "..."],
+"gaps": ["..."], "red_flags": ["..."], "advice": "<1-2 sentences: how to apply / what to emphasize>"}}"""
+
+    raw = _claude(prompt, max_tokens=900, fast=False)
+    return _extract_json(raw)
+
+
+_VERDICT_STYLE = {
+    "High":   ("match-high",   "🟢"),
+    "Medium": ("match-medium", "🟡"),
+    "Low":    ("match-low",    "🟠"),
+    "Skip":   ("match-low",    "🔴"),
+}
+
+
+def _render_fit_result(fit: dict, lang: str) -> None:
+    cls, dot = _VERDICT_STYLE.get(fit.get("verdict", ""), ("match-low", "⚪"))
+    verdict = _html.escape(str(fit.get("verdict", "?")))
+    pct = int(fit.get("match_pct") or 0)
+    st.markdown(
+        f'<div style="margin-bottom:0.5rem">{dot} '
+        f'<span class="{cls}" style="font-size:1.2rem">{verdict}</span>'
+        f'&nbsp;·&nbsp;<span style="color:#e6edf3;font-weight:600">{pct}%</span></div>',
+        unsafe_allow_html=True,
+    )
+    if fit.get("strengths"):
+        st.markdown(
+            ("💪 " if lang == "he" else "💪 ")
+            + " ".join(f'<span class="skill-tag tag-green">{_html.escape(str(s))}</span>'
+                       for s in fit["strengths"][:5]),
+            unsafe_allow_html=True,
+        )
+    if fit.get("gaps"):
+        st.markdown(
+            ("פערים: " if lang == "he" else "Gaps: ")
+            + " ".join(f'<span class="skill-tag tag-red">{_html.escape(str(g))}</span>'
+                       for g in fit["gaps"][:5]),
+            unsafe_allow_html=True,
+        )
+    for rf in (fit.get("red_flags") or [])[:4]:
+        st.markdown(f"⚠️ {rf}")
+    if fit.get("advice"):
+        st.info("💡 " + str(fit["advice"]))
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
@@ -861,7 +959,10 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
                         )
 
         uid = job.get("id", abs(hash(job.get("url", "") + job.get("title", ""))))
-        c1, c2, c3 = st.columns([1, 1, 3])
+        from config import ANTHROPIC_API_KEY
+        has_claude = bool(ANTHROPIC_API_KEY) and ANTHROPIC_API_KEY != "your_key_here"
+
+        c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
         with c1:
             if st.button("📄 " + ("קו\"ח" if lang == "he" else "Build CV"),
                          key=f"{key_prefix}cv_{uid}"):
@@ -871,18 +972,34 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
         with c2:
             if st.button("🔖 " + ("שמור" if lang == "he" else "Save"),
                          key=f"{key_prefix}save_{uid}"):
-                saved = st.session_state.get("saved_jobs", [])
-                if job not in saved:
-                    saved.append(job)
-                    st.session_state.saved_jobs = saved
-                    _add_to_tracker(job)
+                # Persisted in applications.json (stage="Saved") — the single
+                # source of truth; no separate session-only list.
+                _add_to_tracker(job)
                 st.toast("✅ " + ("נשמר!" if lang == "he" else "Saved!"))
         with c3:
+            if st.button("🎯 " + ("נתח התאמה" if lang == "he" else "Analyze Fit"),
+                         key=f"{key_prefix}fit_{uid}", disabled=not has_claude):
+                fit_cache = st.session_state.setdefault("fit_cache", {})
+                if not fit_cache.get(uid):  # empty/failed results retryable
+                    with st.spinner("מנתח התאמה..." if lang == "he" else "Analyzing fit..."):
+                        result = analyze_fit(job, st.session_state.get("profile", {}), lang)
+                        if result:
+                            fit_cache[uid] = result
+                        else:
+                            st.warning("⚠️ " + ("הניתוח נכשל — נסה שוב."
+                                                if lang == "he" else "Analysis failed — try again."))
+        with c4:
             if job.get("url"):
                 st.link_button(
                     "🚀 " + ("הגש מועמדות" if lang == "he" else "Apply Now"),
                     url=job["url"],
                 )
+
+        fit = st.session_state.get("fit_cache", {}).get(uid)
+        if fit:
+            with st.expander("🎯 " + ("ניתוח התאמה" if lang == "he" else "Fit Analysis"),
+                             expanded=True):
+                _render_fit_result(fit, lang)
 
 
 def render(lang: str):
@@ -969,7 +1086,9 @@ def _render_jobs(lang: str):
             jobs = search_jobs(queries, sources, location, exp_level, selected_categories)
             for job in jobs:
                 job["match"] = score_job(job, profile)
-            jobs.sort(key=lambda j: (j.get("date") or "0000-00-00", j["match"]), reverse=True)
+            # Match quality first — the card leads with match%, so ordering
+            # should too; date breaks ties.
+            jobs.sort(key=lambda j: (j["match"], j.get("date") or ""), reverse=True)
             st.session_state.job_results = jobs
             st.session_state.job_query = ", ".join(queries[:3])
             st.session_state.selected_categories = selected_categories
@@ -1016,6 +1135,7 @@ def _add_to_tracker(job: dict):
         "location": job.get("location"),
         "url": job.get("url"),
         "source": job.get("source"),
+        "description": (job.get("description") or "")[:2000],  # for interview prep
         "stage": "Saved",
         "date_saved": datetime.now().strftime("%Y-%m-%d"),
         "date_applied": "",

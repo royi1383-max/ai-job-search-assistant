@@ -1,7 +1,8 @@
 import streamlit as st
 import json
 import os
-from config import TEXTS, PROFILE_PATH, APPLICATIONS_PATH, DATA_DIR
+import html
+from config import TEXTS, PROFILE_PATH, APPLICATIONS_PATH
 
 st.set_page_config(
     page_title="Job Search Engine",
@@ -187,8 +188,6 @@ def _init_state():
         st.session_state.profile = _load_profile()
     if "applications" not in st.session_state:
         st.session_state.applications = _load_applications()
-    if "saved_jobs" not in st.session_state:
-        st.session_state.saved_jobs = []
     if "selected_job" not in st.session_state:
         st.session_state.selected_job = None
 
@@ -232,6 +231,7 @@ def render_sidebar():
             ("companies", t("nav_companies")),
             ("tracker", t("nav_tracker")),
             ("advisor", t("nav_advisor")),
+            ("offers",  t("nav_offers")),
         ]
 
         for page_id, label in pages:
@@ -245,7 +245,7 @@ def render_sidebar():
         st.markdown("---")
         profile = st.session_state.profile
         if profile:
-            filled = sum(1 for k in ["name", "email", "experience", "skills", "education"]
+            filled = sum(1 for k in ["name", "email", "experience_text", "skills", "education"]
                          if profile.get(k))
             pct = int(filled / 5 * 100)
             st.markdown(f"**{t('profile_complete')}:** {pct}%")
@@ -254,14 +254,13 @@ def render_sidebar():
 # ── Pages ───────────────────────────────────────────────────────────────────
 
 def page_home():
-    import modules.profile as mod_profile
-
     profile = st.session_state.profile
     apps = st.session_state.applications
     lang = st.session_state.lang
     rtl = "rtl" if lang == "he" else "ltr"
+    dir_attr = ' dir="rtl"' if lang == "he" else ""
 
-    name = profile.get("name", "אורח" if lang == "he" else "Guest")
+    name = html.escape(profile.get("name", "אורח" if lang == "he" else "Guest"))
     greeting = f"שלום, {name} 👋" if lang == "he" else f"Hello, {name} 👋"
 
     st.markdown(f'<div class="{rtl}"><h1>{greeting}</h1></div>', unsafe_allow_html=True)
@@ -270,14 +269,16 @@ def page_home():
     st.markdown(f'<div class="{rtl}" style="color:#6b7280; margin-bottom:2rem">{subtitle}</div>',
                 unsafe_allow_html=True)
 
-    # Quick stats
-    active_apps = [a for a in apps if a.get("stage") not in ("Offer", "Rejected")]
+    # Quick stats — "Saved" rows are bookmarks, not applications: they count
+    # only in the Saved metric, and persist via applications.json.
+    applied = [a for a in apps if a.get("stage") != "Saved"]
+    active_apps = [a for a in applied if a.get("stage") not in ("Offer", "Rejected")]
     interviews = [a for a in apps if "Interview" in a.get("stage", "")]
-    saved_count = len(st.session_state.saved_jobs)
+    saved_count = len([a for a in apps if a.get("stage") == "Saved"])
 
     col1, col2, col3, col4 = st.columns(4)
     stats = [
-        ("📋", str(len(apps)), "Total Applications" if lang == "en" else "סה\"כ הגשות"),
+        ("📋", str(len(applied)), "Total Applications" if lang == "en" else "סה\"כ הגשות"),
         ("⚡", str(len(active_apps)), "Active" if lang == "en" else "פעיל"),
         ("🎤", str(len(interviews)), "Interviews" if lang == "en" else "ריאיונות"),
         ("🔖", str(saved_count), "Saved Jobs" if lang == "en" else "משרות שמורות"),
@@ -285,7 +286,7 @@ def page_home():
     for col, (icon, val, label) in zip([col1, col2, col3, col4], stats):
         with col:
             st.markdown(f"""
-            <div class="metric-card">
+            <div class="metric-card"{dir_attr}>
                 <div style="font-size:1.8rem">{icon}</div>
                 <div style="font-size:1.6rem;font-weight:700;color:#e6edf3">{val}</div>
                 <div style="font-size:0.8rem;color:#6b7280">{label}</div>
@@ -334,10 +335,10 @@ def page_home():
                            "Offer": "#f59e0b", "Rejected": "#ef4444"}.get(app.get("stage",""), "#6b7280")
             st.markdown(f"""
             <div class="job-card">
-                <b style="color:#e6edf3">{app.get('title','')}</b> —
-                <span style="color:#6b7280">{app.get('company','')}</span>
+                <b style="color:#e6edf3">{html.escape(app.get('title',''))}</b> —
+                <span style="color:#6b7280">{html.escape(app.get('company',''))}</span>
                 <span style="float:right;color:{stage_color};font-size:0.8rem">
-                    ● {app.get('stage','')}
+                    ● {html.escape(app.get('stage',''))}
                 </span>
             </div>""", unsafe_allow_html=True)
 
@@ -377,6 +378,11 @@ def page_advisor():
     mod_advisor.render(st.session_state.lang)
 
 
+def page_offers():
+    import modules.offer_tools as mod_offers
+    mod_offers.render(st.session_state.lang)
+
+
 # ── Router ──────────────────────────────────────────────────────────────────
 _init_state()
 render_sidebar()
@@ -398,3 +404,5 @@ elif page == "tracker":
     page_tracker()
 elif page == "advisor":
     page_advisor()
+elif page == "offers":
+    page_offers()

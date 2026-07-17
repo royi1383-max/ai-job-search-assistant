@@ -11,14 +11,37 @@ def _claude(prompt: str, max_tokens: int = 1000, fast: bool = True) -> str:
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        kwargs = {}
+        if not fast:
+            # Sonnet 5 runs adaptive thinking by default when the param is
+            # omitted; disable to keep the old low-latency behavior.
+            kwargs["thinking"] = {"type": "disabled"}
         msg = client.messages.create(
             model=CLAUDE_FAST if fast else CLAUDE_SMART,
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
+            **kwargs,
         )
         return msg.content[0].text.strip()
     except Exception as e:
         return f"[Error: {e}]"
+
+
+def _extract_json(raw: str, kind: str = "object"):
+    """Pull the first JSON object/array out of a Claude reply. {} / [] on failure."""
+    empty = [] if kind == "array" else {}
+    try:
+        m = re.search(r'\[[\s\S]+\]' if kind == "array" else r'\{[\s\S]+\}', raw)
+        return json.loads(m.group()) if m else empty
+    except Exception:
+        return empty
+
+
+def _to_int(v, default: int = 0) -> int:
+    try:
+        return int(float(str(v).replace(",", "").replace("₪", "").strip()))
+    except Exception:
+        return default
 
 
 def get_interview_questions(role: str, company: str, profile: dict) -> list[dict]:
@@ -39,13 +62,48 @@ Return JSON array: [{{"question":"...","why_asked":"...","tip":"..."}}]
 Return JSON only."""
 
     raw = _claude(prompt, max_tokens=1500, fast=False)
-    try:
-        m = re.search(r'\[[\s\S]+\]', raw)
-        if m:
-            return json.loads(m.group())
-    except Exception:
-        pass
-    return []
+    return _extract_json(raw, kind="array")
+
+
+def generate_interview_prep(app: dict, profile: dict, lang: str) -> str:
+    """Full interview prep guide (markdown) for a tracked application."""
+    title = app.get("title", "")
+    company = app.get("company", "")
+    description = (app.get("description") or "").strip()
+    exp = profile.get("experience_text", "")[:1500]
+    skills = ", ".join(profile.get("skills", [])[:15])
+    lang_name = "Hebrew" if lang == "he" else "English"
+
+    jd_block = (
+        f"JOB DESCRIPTION:\n{description[:2500]}"
+        if description
+        else "JOB DESCRIPTION: (not available — infer typical requirements for this title at this company)"
+    )
+
+    prompt = f"""Create an interview preparation guide for the role "{title}" at {company}.
+
+{jd_block}
+
+CANDIDATE EXPERIENCE:
+{exp}
+
+CANDIDATE SKILLS: {skills}
+
+Write the entire guide in {lang_name}, as markdown with exactly these sections:
+
+## {'שאלות צפויות בראיון' if lang == 'he' else 'Likely Interview Questions'}
+8-10 questions mixing technical (from the job's skill requirements) and behavioral.
+After each question add one short line: why the interviewer asks it.
+
+## {'טיוטות תשובה בשיטת STAR' if lang == 'he' else 'STAR Answer Drafts'}
+3-4 drafts built ONLY from the candidate's actual experience above.
+Each: Situation/Task/Action/Result, max 120 words, quantified where the resume gives numbers.
+Never invent facts not present in the experience text.
+
+## {'שאלות לשאול את המראיין' if lang == 'he' else 'Questions to Ask the Interviewer'}
+5 questions specific to this company and role."""
+
+    return _claude(prompt, max_tokens=3000, fast=False)
 
 
 def skill_gap_analysis(profile: dict, job_description: str) -> dict:
@@ -68,13 +126,7 @@ Return JSON:
 JSON only."""
 
     raw = _claude(prompt, max_tokens=800, fast=True)
-    try:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        if m:
-            return json.loads(m.group())
-    except Exception:
-        pass
-    return {}
+    return _extract_json(raw)
 
 
 COMPANY_SEGMENTS = {
@@ -145,14 +197,8 @@ Return ONLY this JSON (no other text):
   "notes": "<1-2 sentences: why this range, what drives it up/down for this candidate>"
 }}"""
 
-    raw = _claude(prompt, max_tokens=400, fast=False)
-    try:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        if m:
-            return json.loads(m.group())
-    except Exception:
-        pass
-    return {}
+    raw = _claude(prompt, max_tokens=600, fast=False)
+    return _extract_json(raw)
 
 
 def _radar_chart(strengths: list[str], gaps: list[str]):
@@ -264,9 +310,10 @@ def render(lang: str):
             fit_color = {"Strong": "#22c55e", "Good": "#4ade80",
                          "Moderate": "#f59e0b", "Weak": "#ef4444"}.get(fit, "#6b7280")
 
+            fit_label = "התאמה כוללת" if lang == "he" else "Overall Fit"
             st.markdown(f"""
             <div class="metric-card" style="margin-bottom:1rem">
-                <div style="color:#6b7280;font-size:0.85rem">Overall Fit</div>
+                <div style="color:#6b7280;font-size:0.85rem">{fit_label}</div>
                 <div style="color:{fit_color};font-size:1.8rem;font-weight:700">{fit}</div>
                 <div style="color:#8b949e;font-size:0.85rem">{gap.get('fit_reason','')}</div>
             </div>""", unsafe_allow_html=True)
@@ -338,9 +385,9 @@ def render(lang: str):
             for col, (label, val) in zip(
                 [c1, c2, c3],
                 [
-                    ("Min" if lang == "en" else "מינימום", sal.get("min", 0)),
-                    ("Median" if lang == "en" else "חציון", sal.get("mid", 0)),
-                    ("Max" if lang == "en" else "מקסימום", sal.get("max", 0)),
+                    ("Min" if lang == "en" else "מינימום", _to_int(sal.get("min", 0))),
+                    ("Median" if lang == "en" else "חציון", _to_int(sal.get("mid", 0))),
+                    ("Max" if lang == "en" else "מקסימום", _to_int(sal.get("max", 0))),
                 ],
             ):
                 with col:
@@ -361,7 +408,7 @@ def render(lang: str):
             my_min = profile.get("salary_min", 0)
             my_max = profile.get("salary_max", 0)
             if my_min and my_max:
-                mid = sal.get("mid", 0)
+                mid = _to_int(sal.get("mid", 0))
                 if mid > my_max:
                     st.success("🎉 " + ("השוק מציע יותר ממה שציפית — שקול לדרוש יותר." if lang == "he"
                                         else "Market pays above your expectation — consider asking for more!"))
@@ -397,12 +444,7 @@ JSON only."""
 
                 with st.spinner("מנתח מגמות שוק..." if lang == "he" else "Analyzing market trends..."):
                     raw = _claude(prompt, max_tokens=800, fast=False)
-                    try:
-                        m = re.search(r'\[[\s\S]+\]', raw)
-                        items = json.loads(m.group()) if m else []
-                    except Exception:
-                        items = []
-                    st.session_state.learn_result = items
+                    st.session_state.learn_result = _extract_json(raw, kind="array")
 
         items = st.session_state.get("learn_result", [])
         if items:

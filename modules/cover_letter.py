@@ -108,7 +108,10 @@ def export_letter_docx(text: str, profile: dict) -> bytes:
 
     for para_text in text.split("\n"):
         p = doc.add_paragraph(para_text)
-        p.runs[0].font.size = Pt(11) if para_text.strip() else Pt(6)
+        # add_paragraph("") creates no runs — indexing p.runs[0] would crash
+        # on every blank line between paragraphs.
+        for r in p.runs:
+            r.font.size = Pt(11)
 
     buf = io.BytesIO()
     doc.save(buf)

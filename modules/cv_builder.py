@@ -4,7 +4,7 @@ import re
 import json
 import html as _html
 import streamlit as st
-from config import ANTHROPIC_API_KEY, CLAUDE_FAST, TEMPLATES_DIR
+from config import ANTHROPIC_API_KEY, CLAUDE_FAST
 
 
 # ── CV Templates ──────────────────────────────────────────────────────────────
@@ -146,24 +146,74 @@ def get_keywords(jd_text: str) -> list[str]:
     return [w for w, c in sorted(freq.items(), key=lambda x: -x[1]) if c >= 2][:20]
 
 
-def ats_check(cv_data: dict, jd_text: str = "") -> dict:
+def ai_extract_keywords(jd_text: str) -> list[str]:
+    """Claude-based ATS keyword extraction — hard skills, tools, certifications,
+    domain terms. Falls back to [] on failure (caller uses get_keywords then)."""
+    if not jd_text.strip():
+        return []
+    from modules.career_advisor import _claude, _extract_json
+    prompt = (
+        "Extract the 15-20 most important ATS keywords/phrases from this job "
+        "description: hard skills, tools, certifications, methodologies, domain "
+        "terms. Skip soft skills and generic words. Return a JSON array of "
+        "lowercase strings only.\n\n" + jd_text[:3000]
+    )
+    raw = _claude(prompt, max_tokens=400, fast=True)
+    kws = _extract_json(raw, kind="array")
+    return [str(k).lower() for k in kws if isinstance(k, str)][:20]
+
+
+def improve_bullet(bullet: str, missing_keywords: list[str]) -> list[str]:
+    """Rewrite one resume bullet (X-Y-Z formula, strong verb). 2 variants."""
+    from modules.career_advisor import _claude, _extract_json
+    kw_part = (
+        f"If truthful to the original, naturally weave in one of these missing "
+        f"job keywords: {', '.join(missing_keywords[:3])}. Never invent facts."
+        if missing_keywords else "Never invent facts not present in the original."
+    )
+    prompt = f"""Rewrite this resume bullet using a strong action verb and the X-Y-Z formula
+(Accomplished X, as measured by Y, by doing Z). Keep it one line, max 30 words.
+{kw_part}
+
+BULLET: {bullet}
+
+Return a JSON array with exactly 2 rewritten variants (strings)."""
+    raw = _claude(prompt, max_tokens=300, fast=True)
+    return [str(v) for v in _extract_json(raw, kind="array")][:2]
+
+
+def ats_check(cv_data: dict, jd_text: str = "", keywords: list[str] | None = None) -> dict:
     warnings = []
     score = 100
 
     if not cv_data.get("summary"):
         warnings.append("Missing professional summary")
         score -= 10
+    elif len(str(cv_data.get("summary", ""))) > 600:
+        warnings.append("Summary too long (keep under ~4 lines)")
+        score -= 5
     if not cv_data.get("skills"):
         warnings.append("No skills section")
         score -= 15
+    elif len(cv_data.get("skills", [])) > 20:
+        warnings.append("Too many skills listed (>20) — ATS parsers favor a focused list")
+        score -= 5
     if not cv_data.get("experience_text") and not cv_data.get("experience_bullets"):
         warnings.append("No experience section")
         score -= 20
     if not cv_data.get("education"):
         warnings.append("No education listed")
         score -= 5
+    if not cv_data.get("email") and not cv_data.get("phone"):
+        warnings.append("Missing contact info (email/phone)")
+        score -= 10
 
-    keywords = get_keywords(jd_text)
+    bullets = cv_data.get("experience_bullets", [])
+    if bullets and not any(re.search(r"\d", b) for b in bullets):
+        warnings.append("No quantified results in bullets — add numbers/percentages")
+        score -= 5
+
+    keywords = keywords if keywords is not None else get_keywords(jd_text)
     cv_text = (
         str(cv_data.get("summary", "")) + " " +
         str(cv_data.get("experience_text", "")) + " " +
@@ -512,8 +562,24 @@ def render(lang: str):
 
         # ATS + keywords
         st.markdown('<div style="height:0.75rem"></div>', unsafe_allow_html=True)
-        ats = ats_check(st.session_state.tailored_cv, jd_input)
+        has_claude = bool(ANTHROPIC_API_KEY) and ANTHROPIC_API_KEY != "your_key_here"
+        jd_hash = str(hash(jd_input.strip()))
+        ai_kw_cache = st.session_state.setdefault("ai_kw_cache", {})
+
+        if st.button("🤖 " + ("מילות מפתח AI" if lang == "he" else "AI keywords"),
+                     disabled=not has_claude or not jd_input.strip(),
+                     help=("חילוץ מילות מפתח מדויק עם Claude במקום ספירת מילים"
+                           if lang == "he" else
+                           "Precise keyword extraction with Claude instead of word counting")):
+            with st.spinner("מחלץ מילות מפתח..." if lang == "he" else "Extracting keywords..."):
+                kws = ai_extract_keywords(jd_input)
+                if kws:
+                    ai_kw_cache[jd_hash] = kws
+
+        ai_keywords = ai_kw_cache.get(jd_hash)  # None → frequency fallback
+        ats = ats_check(st.session_state.tailored_cv, jd_input, keywords=ai_keywords)
         _render_ats_panel(ats, lang)
+        _render_improve_bullet(st.session_state.tailored_cv, ats, lang, has_claude)
 
     with col_right:
         st.markdown(
@@ -556,34 +622,47 @@ def render(lang: str):
     with st.expander("✏️ " + ("עריכה ידנית" if lang == "he" else "Manual Edit"), expanded=False):
         cv = st.session_state.tailored_cv
 
+        he = lang == "he"
         tab_sum, tab_exp, tab_skills, tab_extra = st.tabs([
-            "Summary", "Experience", "Skills", "Education & More"
+            "תקציר" if he else "Summary",
+            "ניסיון" if he else "Experience",
+            "כישורים" if he else "Skills",
+            "השכלה ועוד" if he else "Education & More",
         ])
         with tab_sum:
             cv["summary"] = st.text_area(
-                "Professional Summary", value=cv.get("summary", ""), height=120)
+                "תקציר מקצועי" if he else "Professional Summary",
+                value=cv.get("summary", ""), height=120)
 
         with tab_exp:
             bullets = cv.get("experience_bullets", [])
             if bullets:
-                st.caption("AI-generated bullets (one per line):")
+                st.caption("שורות שנוצרו ע\"י AI (שורה לכל bullet):" if he
+                           else "AI-generated bullets (one per line):")
                 bullets_text = st.text_area(
-                    "Experience bullets", value="\n".join(bullets), height=200)
+                    "שורות ניסיון" if he else "Experience bullets",
+                    value="\n".join(bullets), height=200)
                 cv["experience_bullets"] = [b.strip() for b in bullets_text.splitlines() if b.strip()]
             cv["experience_text"] = st.text_area(
-                "Full experience text", value=cv.get("experience_text", ""), height=150)
+                "טקסט ניסיון מלא" if he else "Full experience text",
+                value=cv.get("experience_text", ""), height=150)
 
         with tab_skills:
             skills_str = ", ".join(cv.get("highlighted_skills") or cv.get("skills", []))
-            new_skills = st.text_input("Skills (comma-separated)", value=skills_str)
+            new_skills = st.text_input(
+                "כישורים (מופרדים בפסיק)" if he else "Skills (comma-separated)",
+                value=skills_str)
             skill_list = [s.strip() for s in new_skills.split(",") if s.strip()]
             cv["highlighted_skills"] = skill_list
             cv["skills"] = skill_list
 
         with tab_extra:
-            cv["education"]      = st.text_area("Education",      value=cv.get("education", ""),      height=80)
-            cv["certifications"] = st.text_area("Certifications", value=cv.get("certifications", ""), height=80)
-            cv["languages"]      = st.text_input("Languages",     value=cv.get("languages", ""))
+            cv["education"]      = st.text_area("השכלה" if he else "Education",
+                                                value=cv.get("education", ""),      height=80)
+            cv["certifications"] = st.text_area("הסמכות" if he else "Certifications",
+                                                value=cv.get("certifications", ""), height=80)
+            cv["languages"]      = st.text_input("שפות" if he else "Languages",
+                                                 value=cv.get("languages", ""))
 
         st.session_state.tailored_cv = cv
 
@@ -824,19 +903,47 @@ def _render_ats_panel(ats: dict, lang: str):
     matched = ats.get("matched_keywords", [])
     missing = ats.get("missing_keywords", [])
 
-    if matched or missing:
-        kw_html = ""
-        for k in matched:
-            kw_html += (f'<span style="background:#16423240;color:#4ade80;border:1px solid #22c55e40;'
-                        f'border-radius:4px;padding:1px 6px;font-size:0.7rem;margin:2px">'
-                        f'✓ {_html.escape(k)}</span>')
-        for k in missing:
-            kw_html += (f'<span style="background:#7f1d1d20;color:#f87171;border:1px solid #ef444440;'
-                        f'border-radius:4px;padding:1px 6px;font-size:0.7rem;margin:2px">'
-                        f'✗ {_html.escape(k)}</span>')
-        st.markdown(
-            f'<div style="margin-top:0.3rem;line-height:2">{kw_html}</div></div>',
-            unsafe_allow_html=True,
+    kw_html = ""
+    for k in matched:
+        kw_html += (f'<span style="background:#16423240;color:#4ade80;border:1px solid #22c55e40;'
+                    f'border-radius:4px;padding:1px 6px;font-size:0.7rem;margin:2px">'
+                    f'✓ {_html.escape(k)}</span>')
+    for k in missing:
+        kw_html += (f'<span style="background:#7f1d1d20;color:#f87171;border:1px solid #ef444440;'
+                    f'border-radius:4px;padding:1px 6px;font-size:0.7rem;margin:2px">'
+                    f'✗ {_html.escape(k)}</span>')
+    # Single close for the panel div opened above — one code path, no dangling tag.
+    st.markdown(
+        f'<div style="margin-top:0.3rem;line-height:2">{kw_html}</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _render_improve_bullet(cv_data: dict, ats: dict, lang: str, has_claude: bool):
+    """'Improve this bullet' action — X-Y-Z rewrite with missing-keyword weaving."""
+    bullets = cv_data.get("experience_bullets") or [
+        b.strip().lstrip("•-· ") for b in str(cv_data.get("experience_text", "")).splitlines()
+        if b.strip() and len(b.strip()) > 15
+    ]
+    if not bullets:
+        return
+
+    with st.expander("✨ " + ("שפר ניסוח bullet" if lang == "he" else "Improve a bullet")):
+        chosen = st.selectbox(
+            "בחר שורה" if lang == "he" else "Pick a line",
+            bullets, key="improve_bullet_select",
+            format_func=lambda b: b[:80] + ("…" if len(b) > 80 else ""),
         )
-    else:
-        st.markdown("</div>", unsafe_allow_html=True)
+        if st.button("✨ " + ("שכתב" if lang == "he" else "Rewrite"),
+                     key="improve_bullet_btn", disabled=not has_claude):
+            with st.spinner("משכתב..." if lang == "he" else "Rewriting..."):
+                variants = improve_bullet(chosen, ats.get("missing_keywords", []))
+            if variants:
+                st.session_state["bullet_variants"] = (chosen, variants)
+            else:
+                st.warning("⚠️ " + ("נסה שוב" if lang == "he" else "Try again"))
+
+        cached = st.session_state.get("bullet_variants")
+        if cached and cached[0] == chosen:
+            for v in cached[1]:
+                st.code(v, language=None)

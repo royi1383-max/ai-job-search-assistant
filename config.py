@@ -13,7 +13,7 @@ PROFILE_PATH = os.path.join(DATA_DIR, "profile.json")
 APPLICATIONS_PATH = os.path.join(DATA_DIR, "applications.json")
 
 CLAUDE_FAST = "claude-haiku-4-5-20251001"
-CLAUDE_SMART = "claude-sonnet-4-6"
+CLAUDE_SMART = "claude-sonnet-5"
 
 JOB_SEARCH_CACHE_TTL = 1800  # 30 minutes
 
@@ -575,6 +575,7 @@ TEXTS = {
         "nav_companies": "🏢 חברות",
         "nav_tracker": "🚀 מעקב הגשות",
         "nav_advisor": "🎯 יועץ קריירה",
+        "nav_offers": "💼 כלים להצעה",
         "search_placeholder": "חפש משרה, חברה או תפקיד...",
         "match_score": "התאמה",
         "apply_now": "הגש מועמדות",
@@ -595,6 +596,7 @@ TEXTS = {
         "nav_companies": "🏢 Companies",
         "nav_tracker": "🚀 Application Tracker",
         "nav_advisor": "🎯 Career Advisor",
+        "nav_offers": "💼 Offer Tools",
         "search_placeholder": "Search job title, company, or keyword...",
         "match_score": "Match",
         "apply_now": "Apply Now",
