@@ -33,7 +33,7 @@ ROLE_CATEGORIES = {
         "Intelligence Analyst", "Insights Analyst", "Reporting Analyst",
         "Product Analyst", "Growth Analyst", "Marketing Analyst",
         "Commercial Analyst", "Data Specialist", "Analytics Specialist",
-        "Analytics Engineer", "Data Engineer",
+        "Analytics Engineer",
     ],
     "💼 Business & Operations": [
         "Business Analyst", "Business Analysis",
@@ -68,6 +68,16 @@ ROLE_CATEGORIES = {
         "Risk Analyst", "Credit Analyst", "Quantitative Analyst",
         "M&A Analyst", "Mergers and Acquisitions Analyst",
     ],
+    "📅 Project Management": [
+        "Project Manager", "Program Manager", "Technical Project Manager",
+        "IT Project Manager", "Junior Project Manager", "Delivery Manager",
+        "PMO Analyst", "PMO Coordinator", "Project Coordinator",
+    ],
+    "🧭 Consulting": [
+        "Strategy Consultant", "Management Consultant", "Business Consultant",
+        "Associate Consultant", "Junior Consultant", "Consulting Analyst",
+        "Strategy & Operations Consultant",
+    ],
 }
 
 # Broad queries sent to each job source per category (broad = fewer API calls)
@@ -76,6 +86,8 @@ PRIMARY_QUERIES = {
     "💼 Business & Operations": ["operations analyst", "business analyst", "operations"],
     "🚀 Product & Strategy":    ["product analyst", "product operations"],
     "💰 Finance & Investment":  ["investment analyst", "financial analyst", "portfolio analyst"],
+    "📅 Project Management":    ["project manager", "program manager"],
+    "🧭 Consulting":            ["strategy consultant", "management consultant", "business consultant"],
 }
 
 # Hebrew queries for the Hebrew-language job boards (AllJobs/Drushim/JobMaster).
@@ -91,6 +103,8 @@ PRIMARY_QUERIES_HE = {
     "💼 Business & Operations": ["אנליסט עסקי", "אנליסט תפעולי"],
     "🚀 Product & Strategy":    ["אנליסט צמיחה", "אנליסט מוצר"],
     "💰 Finance & Investment":  ["כלכלן", "אנליסט פיננסי", "אנליסט השקעות", "אנליסט סיכונים", "אנליסט אשראי"],
+    "📅 Project Management":    ["מנהל פרויקטים", "רכז פרויקטים"],
+    "🧭 Consulting":            ["יועץ אסטרטגי", "יועץ עסקי"],
 }
 
 # Post-filter keywords: job title must contain at least one of these
@@ -122,6 +136,17 @@ MATCH_KEYWORDS = {
         "m&a analyst", "fp&a", "treasury analyst", "junior analyst",
         "asset management", "quantitative analyst",
     ],
+    "📅 Project Management": [
+        "project manager", "program manager", "technical project manager",
+        "it project manager", "junior project manager", "delivery manager",
+        "pmo analyst", "pmo coordinator", "project coordinator",
+        "project management",
+    ],
+    "🧭 Consulting": [
+        "strategy consultant", "management consultant", "business consultant",
+        "associate consultant", "junior consultant", "consulting analyst",
+        "strategy & operations consultant", "strategy and operations consultant",
+    ],
 }
 
 # Hebrew title-matching phrases per category (post-filter), same validation
@@ -140,6 +165,12 @@ MATCH_KEYWORDS_HE = {
     "💰 Finance & Investment": [
         "כלכלן", "אנליסט פיננסי", "אנליסט השקעות", "אנליסט סיכונים",
         "אנליסט אשראי", "בקרה תקציבית", "בקר תקציב",
+    ],
+    "📅 Project Management": [
+        "מנהל פרויקטים", "רכז פרויקטים", "מנהל פרויקט",
+    ],
+    "🧭 Consulting": [
+        "יועץ אסטרטגי", "יועץ עסקי", "יועץ ניהולי",
     ],
 }
 
