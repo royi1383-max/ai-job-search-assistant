@@ -72,6 +72,11 @@ ROLE_CATEGORIES = {
         "Project Manager", "Program Manager", "Technical Project Manager",
         "IT Project Manager", "Junior Project Manager", "Delivery Manager",
         "PMO Analyst", "PMO Coordinator", "Project Coordinator",
+        "Technical Program Manager", "R&D Project Manager", "R&D Program Manager",
+        "NPI Project Manager", "Scrum Master", "Agile Project Manager",
+        "Agile Coach", "Release Manager", "Implementation Manager",
+        "Engineering Program Manager", "R&D PMO", "PMO Manager",
+        "Product Delivery Manager",
     ],
     "🧭 Consulting": [
         "Strategy Consultant", "Management Consultant", "Business Consultant",
@@ -86,7 +91,7 @@ PRIMARY_QUERIES = {
     "💼 Business & Operations": ["operations analyst", "business analyst", "operations"],
     "🚀 Product & Strategy":    ["product analyst", "product operations"],
     "💰 Finance & Investment":  ["investment analyst", "financial analyst", "portfolio analyst"],
-    "📅 Project Management":    ["project manager", "program manager"],
+    "📅 Project Management":    ["project manager", "program manager", "scrum master"],
     "🧭 Consulting":            ["strategy consultant", "management consultant", "business consultant"],
 }
 
@@ -103,7 +108,7 @@ PRIMARY_QUERIES_HE = {
     "💼 Business & Operations": ["אנליסט עסקי", "אנליסט תפעולי"],
     "🚀 Product & Strategy":    ["אנליסט צמיחה", "אנליסט מוצר"],
     "💰 Finance & Investment":  ["כלכלן", "אנליסט פיננסי", "אנליסט השקעות", "אנליסט סיכונים", "אנליסט אשראי"],
-    "📅 Project Management":    ["מנהל פרויקטים", "רכז פרויקטים"],
+    "📅 Project Management":    ["מנהל פרויקטים", "רכז פרויקטים", "מנהל תוכנית", "סקראם מאסטר"],
     "🧭 Consulting":            ["יועץ אסטרטגי", "יועץ עסקי"],
 }
 
@@ -140,7 +145,12 @@ MATCH_KEYWORDS = {
         "project manager", "program manager", "technical project manager",
         "it project manager", "junior project manager", "delivery manager",
         "pmo analyst", "pmo coordinator", "project coordinator",
-        "project management",
+        "project management", "technical program manager",
+        "r&d project manager", "r&d program manager", "npi project manager",
+        "scrum master", "agile project manager", "agile coach",
+        "release manager", "implementation manager",
+        "engineering program manager", "r&d pmo", "pmo manager",
+        "product delivery manager",
     ],
     "🧭 Consulting": [
         "strategy consultant", "management consultant", "business consultant",
@@ -167,7 +177,8 @@ MATCH_KEYWORDS_HE = {
         "אנליסט אשראי", "בקרה תקציבית", "בקר תקציב",
     ],
     "📅 Project Management": [
-        "מנהל פרויקטים", "רכז פרויקטים", "מנהל פרויקט",
+        "מנהל פרויקטים", "רכז פרויקטים", "מנהל פרויקט", "מנהל תוכנית",
+        "סקראם מאסטר",
     ],
     "🧭 Consulting": [
         "יועץ אסטרטגי", "יועץ עסקי", "יועץ ניהולי",
