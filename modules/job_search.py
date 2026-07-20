@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from config import (
     JOB_SEARCH_CACHE_TTL, DATA_DIR, APPLICATIONS_PATH,
     ROLE_CATEGORIES, PRIMARY_QUERIES, MATCH_KEYWORDS,
-    PRIMARY_QUERIES_HE, MATCH_KEYWORDS_HE,
+    PRIMARY_QUERIES_HE, MATCH_KEYWORDS_HE, CATEGORY_EXCLUDE_KEYWORDS,
     EXPERIENCE_LEVELS, EXPERIENCE_EXCLUDE,
 )
 
@@ -221,6 +221,8 @@ def _matches_categories(job: dict, selected_categories: list[str]) -> bool:
     title = job.get("title", "").lower()
     title_he = _normalize_he(job.get("title", ""))
     for cat in selected_categories:
+        if any(ex in title for ex in CATEGORY_EXCLUDE_KEYWORDS.get(cat, [])):
+            continue
         if any(kw in title for kw in MATCH_KEYWORDS.get(cat, [])):
             return True
         if any(_he_keyword_pattern(kw).search(title_he) for kw in MATCH_KEYWORDS_HE.get(cat, [])):

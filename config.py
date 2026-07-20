@@ -69,14 +69,9 @@ ROLE_CATEGORIES = {
         "M&A Analyst", "Mergers and Acquisitions Analyst",
     ],
     "📅 Project Management": [
-        "Project Manager", "Program Manager", "Technical Project Manager",
-        "IT Project Manager", "Junior Project Manager", "Delivery Manager",
-        "PMO Analyst", "PMO Coordinator", "Project Coordinator",
-        "Technical Program Manager", "R&D Project Manager", "R&D Program Manager",
-        "NPI Project Manager", "Scrum Master", "Agile Project Manager",
-        "Agile Coach", "Release Manager", "Implementation Manager",
-        "Engineering Program Manager", "R&D PMO", "PMO Manager",
-        "Product Delivery Manager",
+        "Project Manager", "Program Manager", "Junior Project Manager",
+        "Delivery Manager", "PMO Analyst", "PMO Coordinator",
+        "Project Coordinator", "Implementation Manager",
     ],
     "🧭 Consulting": [
         "Strategy Consultant", "Management Consultant", "Business Consultant",
@@ -91,7 +86,7 @@ PRIMARY_QUERIES = {
     "💼 Business & Operations": ["operations analyst", "business analyst", "operations"],
     "🚀 Product & Strategy":    ["product analyst", "product operations"],
     "💰 Finance & Investment":  ["investment analyst", "financial analyst", "portfolio analyst"],
-    "📅 Project Management":    ["project manager", "program manager", "scrum master"],
+    "📅 Project Management":    ["project manager", "program manager", "implementation manager"],
     "🧭 Consulting":            ["strategy consultant", "management consultant", "business consultant"],
 }
 
@@ -108,7 +103,7 @@ PRIMARY_QUERIES_HE = {
     "💼 Business & Operations": ["אנליסט עסקי", "אנליסט תפעולי"],
     "🚀 Product & Strategy":    ["אנליסט צמיחה", "אנליסט מוצר"],
     "💰 Finance & Investment":  ["כלכלן", "אנליסט פיננסי", "אנליסט השקעות", "אנליסט סיכונים", "אנליסט אשראי"],
-    "📅 Project Management":    ["מנהל פרויקטים", "רכז פרויקטים", "מנהל תוכנית", "סקראם מאסטר"],
+    "📅 Project Management":    ["מנהל פרויקטים", "רכז פרויקטים", "מנהל תוכנית"],
     "🧭 Consulting":            ["יועץ אסטרטגי", "יועץ עסקי"],
 }
 
@@ -142,15 +137,9 @@ MATCH_KEYWORDS = {
         "asset management", "quantitative analyst",
     ],
     "📅 Project Management": [
-        "project manager", "program manager", "technical project manager",
-        "it project manager", "junior project manager", "delivery manager",
-        "pmo analyst", "pmo coordinator", "project coordinator",
-        "project management", "technical program manager",
-        "r&d project manager", "r&d program manager", "npi project manager",
-        "scrum master", "agile project manager", "agile coach",
-        "release manager", "implementation manager",
-        "engineering program manager", "r&d pmo", "pmo manager",
-        "product delivery manager",
+        "project manager", "program manager", "junior project manager",
+        "delivery manager", "pmo analyst", "pmo coordinator",
+        "project coordinator", "implementation manager", "project management",
     ],
     "🧭 Consulting": [
         "strategy consultant", "management consultant", "business consultant",
@@ -178,10 +167,21 @@ MATCH_KEYWORDS_HE = {
     ],
     "📅 Project Management": [
         "מנהל פרויקטים", "רכז פרויקטים", "מנהל פרויקט", "מנהל תוכנית",
-        "סקראם מאסטר",
     ],
     "🧭 Consulting": [
         "יועץ אסטרטגי", "יועץ עסקי", "יועץ ניהולי",
+    ],
+}
+
+# Category match is plain substring, so a bare title-match keyword like
+# "project manager" also matches qualified variants ("Technical Project
+# Manager", "R&D Project Manager") that need an engineering background this
+# candidate doesn't have. These terms veto a match for their category even
+# though the base keyword is present.
+CATEGORY_EXCLUDE_KEYWORDS = {
+    "📅 Project Management": [
+        "technical", "r&d", "it project", "npi", "engineering",
+        "release manager", "scrum", "agile",
     ],
 }
 
