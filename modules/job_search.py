@@ -112,17 +112,64 @@ def _parse_date_str(s: str) -> str:
         return datetime.strptime(s, "%d/%m/%Y").strftime("%Y-%m-%d")
     except ValueError:
         pass
-    # Hebrew relative: "לפני N ימים"
-    m = _re.search(r'לפני\s+(\d+)\s+ימי?', s)
+    sl = s.lower()
+    # Numeric relative, Hebrew or English — MUST be checked before the plain
+    # "ago"/"שעה" catch-alls below, which would otherwise swallow "3 days ago"
+    # / "לפני 3 ימים" and collapse every relative date to today regardless of N.
+    m = _re.search(r'לפני\s+(\d+)\s+שבוע', s) or _re.search(r'(\d+)\s*weeks?\s*ago', sl)
+    if m:
+        return (today - timedelta(weeks=int(m.group(1)))).strftime("%Y-%m-%d")
+    m = _re.search(r'לפני\s+(\d+)\s+ימי?', s) or _re.search(r'(\d+)\s*days?\s*ago', sl)
     if m:
         return (today - timedelta(days=int(m.group(1)))).strftime("%Y-%m-%d")
-    if "היום" in s or "שעה" in s or "שעות" in s or "דקה" in s or "דקות" in s or "ago" in s.lower():
+    if "היום" in s or "שעה" in s or "שעות" in s or "דקה" in s or "דקות" in s or "hour" in sl or "minute" in sl or "today" in sl:
         return today.strftime("%Y-%m-%d")
-    if "אתמול" in s or "yesterday" in s.lower():
+    if "אתמול" in s or "yesterday" in sl:
         return (today - timedelta(days=1)).strftime("%Y-%m-%d")
-    if "שבוע" in s or "week" in s.lower():
+    if "שבוע" in s or "week" in sl:
         return (today - timedelta(days=7)).strftime("%Y-%m-%d")
     return ""
+
+
+# ── First-seen tracking ─────────────────────────────────────────────────────
+# Some boards (mainly the scraped Israeli sites) bump their own displayed
+# "posted" date on a rolling basis regardless of when the listing actually
+# went up, so job["date"] there isn't trustworthy as a freshness signal. This
+# tracks, per job id, the date WE first observed the listing — independent of
+# whatever the source claims — and survives across searches via a small
+# local JSON file.
+_FIRST_SEEN_PATH = os.path.join(DATA_DIR, "job_first_seen.json")
+
+
+def _load_first_seen() -> dict:
+    if os.path.exists(_FIRST_SEEN_PATH):
+        try:
+            with open(_FIRST_SEEN_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_first_seen(data: dict) -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(_FIRST_SEEN_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def _tag_first_seen(jobs: list[dict]) -> list[dict]:
+    seen = _load_first_seen()
+    today = datetime.now().strftime("%Y-%m-%d")
+    changed = False
+    for j in jobs:
+        jid = str(j.get("id", ""))
+        if jid not in seen:
+            seen[jid] = today
+            changed = True
+        j["first_seen"] = seen[jid]
+    if changed:
+        _save_first_seen(seen)
+    return jobs
 
 
 def _filter_by_date(jobs: list[dict], days: int = 7) -> list[dict]:
@@ -631,7 +678,7 @@ def _parse_linkedin_cards(soup, loc: str) -> list[dict]:
             "source": "LinkedIn",
             "url": href,
             "description": "",
-            "date": time_el.get("datetime", "") if time_el else "",
+            "date": (time_el.get("datetime", "") if time_el else "")[:10],
         })
     return results
 
@@ -753,7 +800,7 @@ def search_jobs(
     li_results = _filter_by_date(li_results, days=7)
     unique = other_results + li_results
 
-    return unique
+    return _tag_first_seen(unique)
 
 
 # ── Match scoring ─────────────────────────────────────────────────────────────
@@ -838,8 +885,37 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
     source   = _html.escape(job.get("source", ""))
     desc     = _html.escape(desc_raw[:220])
 
+    # First-seen: independent of the source's own (sometimes self-bumped)
+    # displayed date — see _tag_first_seen(). Shown as a relative label with
+    # a tooltip explaining why it can differ from the source date.
+    fs_label = ""
+    first_seen_raw = job.get("first_seen", "")
+    if first_seen_raw:
+        try:
+            days_ago = (datetime.now() - datetime.strptime(first_seen_raw, "%Y-%m-%d")).days
+        except ValueError:
+            days_ago = None
+        if days_ago is not None:
+            if days_ago <= 0:
+                fs_label = "היום" if lang == "he" else "today"
+            elif days_ago == 1:
+                fs_label = "אתמול" if lang == "he" else "yesterday"
+            else:
+                fs_label = f"לפני {days_ago} ימים" if lang == "he" else f"{days_ago}d ago"
+
     loc_part  = f'&nbsp;·&nbsp;<span style="color:#6b7280;font-size:0.9rem">{location}</span>' if location else ""
     date_part = f'&nbsp;·&nbsp;<span style="color:#6b7280;font-size:0.78rem">{date}</span>' if date else ""
+    fs_tip = (
+        "התאריך שהאתר מציג עלול להתעדכן כל יום ולא לשקף מתי המשרה עלתה באמת — "
+        "זה התאריך שבו המערכת שלנו ראתה את המשרה בפעם הראשונה"
+        if lang == "he" else
+        "The source site's own date can get bumped daily and not reflect the real "
+        "posting date — this is when our system first saw this listing"
+    )
+    fs_part = (
+        f'&nbsp;·&nbsp;<span style="color:#6b7280;font-size:0.78rem" title="{_html.escape(fs_tip)}">'
+        f'👁 {"נראה לראשונה" if lang == "he" else "First seen"}: {_html.escape(fs_label)}</span>'
+    ) if fs_label else ""
     desc_part = (
         f'<div style="color:#8b949e;font-size:0.82rem;margin-top:0.5rem">'
         f'{desc}{"..." if len(desc_raw) > 220 else ""}</div>'
@@ -852,7 +928,7 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
             f'<div>'
             f'<span style="font-size:1.05rem;font-weight:600;color:#e6edf3">{title}</span><br>'
             f'<span style="color:#6b7280;font-size:0.9rem">{company}</span>'
-            f'{loc_part}{date_part}'
+            f'{loc_part}{date_part}{fs_part}'
             f'</div>'
             f'<div style="text-align:right;flex-shrink:0;margin-left:1rem">'
             f'<span class="{match_class}" style="font-size:1.1rem">{match_pct}%</span><br>'
