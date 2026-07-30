@@ -32,6 +32,7 @@ SOURCE_COLORS = {
     "JobMaster":  "#d946ef",
     "Comeet":     "#f97316",
     "Ashby":      "#7c3aed",
+    "Workable":   "#0056f2",
 }
 
 CENTER_CITIES = [
@@ -256,7 +257,7 @@ GREENHOUSE_BOARDS = [
     "riskified", "transmitsecurity", "catonetworks", "innovid",
     "jfrog", "liveperson", "optimove", "bigid", "yotpo", "forter",
     "orioninnovation", "bringg", "torq", "doubleverify",
-    "connecteam", "orcasecurity", "openweb",
+    "connecteam", "orcasecurity", "openweb", "descope",
     # Israeli-founded, global
     "wolt", "payoneer", "melio", "pagaya",
     # Global companies with large Israel R&D
@@ -375,7 +376,7 @@ def _fetch_smartrecruiters(company: str) -> list[dict]:
 # Only slugs confirmed live (tested 2026-07) by inspecting actual job content —
 # a same-name slug can belong to an unrelated global company (e.g. "aleph"
 # resolves to a US FP&A startup, not the Israeli Aleph VC — excluded).
-ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant"]
+ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant", "glow"]
 
 
 @st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
@@ -714,6 +715,44 @@ def _fetch_linkedin(query: str, location: str = "Israel") -> list[dict]:
         return []
 
 
+# ── Workable public job-board aggregator ──────────────────────────────────────
+
+@st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
+def _fetch_workable(query: str, location: str = "Israel") -> list[dict]:
+    """Fetch jobs from Workable's public cross-company aggregator
+    (jobs.workable.com/api/v1/jobs), filtered server-side by location + query —
+    no per-company board list to curate/verify, unlike Greenhouse/Lever/Ashby/
+    SmartRecruiters above (verified 2026-07: single query for a blank keyword
+    already returns 117 live Israel postings across many companies at once).
+    Single page only (20 results) — the API's pagination param is undocumented
+    and neither `token` nor `nextPageToken` actually advanced the page in
+    testing (both silently re-returned page 1), so don't fake multi-page
+    coverage; `query` narrowing already does most of the filtering work.
+    """
+    try:
+        url = "https://jobs.workable.com/api/v1/jobs"
+        r = requests.get(url, params={"location": location, "query": query}, headers=HEADERS, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        results = []
+        for job in data.get("jobs", []):
+            company = job.get("company", {}) or {}
+            results.append({
+                "id": f"wk_{job.get('id')}",
+                "title": job.get("title", ""),
+                "company": company.get("title", ""),
+                "location": ", ".join(job.get("locations", [])) or location,
+                "source": "Workable",
+                "url": job.get("url", ""),
+                "description": _strip_html(job.get("description", ""))[:1500],
+                "date": (job.get("created") or "")[:10],
+            })
+        return results
+    except Exception:
+        return []
+
+
 # ── Aggregator ────────────────────────────────────────────────────────────────
 
 def search_jobs(
@@ -763,6 +802,8 @@ def search_jobs(
         fetch_tasks += [lambda b=board: _fetch_ashby(b) for board in ASHBY_BOARDS]
     if "LinkedIn" in sources:
         fetch_tasks += [lambda q=query: _fetch_linkedin(q, li_loc) for query in queries]
+    if "Workable" in sources:
+        fetch_tasks += [lambda q=query: _fetch_workable(q, li_loc) for query in queries]
     if "AllJobs" in sources:
         fetch_tasks += [lambda q=query: _fetch_alljobs(q, alljobs_loc, alljobs_exp) for query in queries]
     if "Drushim" in sources:
@@ -1039,8 +1080,8 @@ def _render_jobs(lang: str):
     with col_src:
         sources = st.multiselect(
             "מקורות" if lang == "he" else "Sources",
-            ["Greenhouse", "Lever", "SmartRecruiters", "Comeet", "Ashby", "LinkedIn", "AllJobs", "Drushim", "JobMaster"],
-            default=["Greenhouse", "Lever", "SmartRecruiters", "Comeet", "Ashby", "LinkedIn", "AllJobs", "Drushim", "JobMaster"],
+            ["Greenhouse", "Lever", "SmartRecruiters", "Comeet", "Ashby", "Workable", "LinkedIn", "AllJobs", "Drushim", "JobMaster"],
+            default=["Greenhouse", "Lever", "SmartRecruiters", "Comeet", "Ashby", "Workable", "LinkedIn", "AllJobs", "Drushim", "JobMaster"],
             label_visibility="collapsed",
         )
 
@@ -1068,9 +1109,10 @@ def _render_jobs(lang: str):
             jobs = search_jobs(queries, sources, location, exp_level, selected_categories)
             for job in jobs:
                 job["match"] = score_job(job, profile)
-            # Match quality first — the card leads with match%, so ordering
-            # should too; date breaks ties.
-            jobs.sort(key=lambda j: (j["match"], j.get("date") or ""), reverse=True)
+            # First-seen first (today's newly-discovered listings lead) — our
+            # own tracking, not the source's own possibly-bumped date. Match
+            # quality breaks ties within the same first-seen day.
+            jobs.sort(key=lambda j: (j.get("first_seen") or "", j["match"]), reverse=True)
             st.session_state.job_results = jobs
             st.session_state.job_query = ", ".join(queries[:3])
             st.session_state.selected_categories = selected_categories
