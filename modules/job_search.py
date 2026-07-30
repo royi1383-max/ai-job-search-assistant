@@ -258,6 +258,7 @@ GREENHOUSE_BOARDS = [
     "jfrog", "liveperson", "optimove", "bigid", "yotpo", "forter",
     "orioninnovation", "bringg", "torq", "doubleverify",
     "connecteam", "orcasecurity", "openweb", "descope",
+    "via", "tomorrow", "helloheart", "datarails", "fireblocks",
     # Israeli-founded, global
     "wolt", "payoneer", "melio", "pagaya",
     # Global companies with large Israel R&D
@@ -298,7 +299,7 @@ def _fetch_greenhouse(board: str) -> list[dict]:
 
 # Only boards confirmed live (tested 2026-07).
 LEVER_BOARDS = [
-    "walkme", "cloudinary", "houzz", "logz",
+    "walkme", "cloudinary", "houzz", "logz", "tonkean",
 ]
 
 
@@ -317,7 +318,7 @@ def _fetch_lever(board: str) -> list[dict]:
         for job in data:
             title    = job.get("text", "")
             location = job.get("categories", {}).get("location", "")
-            desc_blocks = job.get("descriptionBody", {}).get("descriptionBody", "") or ""
+            desc_blocks = job.get("descriptionBody") or ""
             results.append({
                 "id": f"lv_{board}_{job.get('id')}",
                 "title": title,
@@ -339,7 +340,7 @@ def _fetch_lever(board: str) -> list[dict]:
 
 # Only slugs confirmed live (tested 2026-07). Others 404 or resolve to an
 # unrelated company squatting the same slug.
-SMARTRECRUITERS_BOARDS = ["atera"]
+SMARTRECRUITERS_BOARDS = ["atera", "armis"]
 
 
 @st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
@@ -376,7 +377,7 @@ def _fetch_smartrecruiters(company: str) -> list[dict]:
 # Only slugs confirmed live (tested 2026-07) by inspecting actual job content —
 # a same-name slug can belong to an unrelated global company (e.g. "aleph"
 # resolves to a US FP&A startup, not the Israeli Aleph VC — excluded).
-ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant", "glow"]
+ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant", "glow", "beach-bum"]
 
 
 @st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
