@@ -1,6 +1,7 @@
 import json
 import os
 import html
+import hashlib
 import streamlit as st
 from datetime import datetime
 from config import APPLICATIONS_PATH, DATA_DIR, KANBAN_STAGES, ANTHROPIC_API_KEY
@@ -15,8 +16,13 @@ def _save_apps(apps: list):
 
 def _aid(app: dict) -> str:
     """Stable per-application key — positional indices shift on add/delete and
-    leave Streamlit widget state pointing at the wrong row."""
-    return str(app.get("id") or f"h{abs(hash((app.get('url', ''), app.get('title', ''))))}")
+    leave Streamlit widget state pointing at the wrong row. Python's builtin
+    hash() is randomized per process, so it can't be used here either — this
+    key gets compared across server restarts (applications.json persists)."""
+    if app.get("id"):
+        return str(app["id"])
+    raw = (app.get("url", "") + app.get("title", "")).encode("utf-8")
+    return "h" + hashlib.md5(raw).hexdigest()[:12]
 
 
 def render(lang: str):

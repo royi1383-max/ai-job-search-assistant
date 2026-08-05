@@ -1,5 +1,6 @@
 import json
 import os
+import hashlib
 import html as _html
 import requests
 import streamlit as st
@@ -164,7 +165,7 @@ def _fetch_alljobs_by_company(company_name: str) -> list[dict]:
             href = title_el.get("href", "")
             full_url = ("https://www.alljobs.co.il" + href) if href.startswith("/") else href
             results.append({
-                "id": f"aj_co_{abs(hash(title_el.text.strip() + company_name))}",
+                "id": f"aj_co_{hashlib.md5((title_el.text.strip() + company_name).encode('utf-8')).hexdigest()[:12]}",
                 "title": title_el.text.strip(),
                 "company": company_name,
                 "location": loc_el.text.strip() if loc_el else "",
@@ -201,7 +202,7 @@ def _scrape_schema_jobs(career_url: str, company_name: str) -> list[dict]:
                             addr = loc.get("address", {})
                             loc_str = addr.get("addressLocality", "") if isinstance(addr, dict) else str(addr)
                         jobs.append({
-                            "id": f"schema_{abs(hash(item.get('title','') + company_name))}",
+                            "id": f"schema_{hashlib.md5((item.get('title','') + company_name).encode('utf-8')).hexdigest()[:12]}",
                             "title": item.get("title", ""),
                             "company": company_name,
                             "location": loc_str,

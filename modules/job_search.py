@@ -1,6 +1,7 @@
 import re
 import json
 import os
+import hashlib
 import html as _html
 import concurrent.futures
 import requests
@@ -20,6 +21,14 @@ HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     )
 }
+
+def _stable_hash(s: str) -> str:
+    """Deterministic id fragment. Python's builtin hash() is randomized per
+    process (PYTHONHASHSEED) — using it for job ids meant every server
+    restart produced a different id for the exact same listing, which broke
+    first-seen tracking (every restart looked like a brand-new job)."""
+    return hashlib.md5(s.encode("utf-8")).hexdigest()[:12]
+
 
 SOURCE_COLORS = {
     "Greenhouse": "#22c55e",
@@ -545,7 +554,7 @@ def _fetch_alljobs(query: str, location: str = "תל אביב", exp_code: str = 
             href = title_el.get("href", "")
             full_url = ("https://www.alljobs.co.il" + href) if href.startswith("/") else href
             results.append({
-                "id": f"aj_{abs(hash(title_el.text + (company_el.text if company_el else '')))}",
+                "id": f"aj_{_stable_hash(title_el.text + (company_el.text if company_el else ''))}",
                 "title": title_el.text.strip(),
                 "company": company_el.text.strip() if company_el else "",
                 "location": loc_el.text.strip() if loc_el else location,
@@ -596,7 +605,7 @@ def _fetch_drushim(query: str, location: str = "", exp_code: str = "0") -> list[
             full_url = (base + href) if href.startswith("/") else href
             loc_text = loc_el.get_text(strip=True).rstrip("|").strip() if loc_el else ""
             results.append({
-                "id": f"dr_{abs(hash(title_el.get_text(strip=True) + href))}",
+                "id": f"dr_{_stable_hash(title_el.get_text(strip=True) + href)}",
                 "title": title_el.get_text(strip=True),
                 "company": company_el.get_text(strip=True) if company_el else "",
                 "location": loc_text or location,
@@ -646,7 +655,7 @@ def _fetch_jobmaster(query: str, location: str = "") -> list[dict]:
 
             title = title_el.text.strip()
             results.append({
-                "id": f"jm_{abs(hash(title + href))}",
+                "id": f"jm_{_stable_hash(title + href)}",
                 "title": title,
                 "company": company_el.text.strip() if company_el else "",
                 "location": loc_el.text.strip() if loc_el else location,
@@ -675,7 +684,7 @@ def _parse_linkedin_cards(soup, loc: str) -> list[dict]:
             continue
         href = link_el.get("href", "").split("?")[0]
         results.append({
-            "id": f"li_{abs(hash(href))}",
+            "id": f"li_{_stable_hash(href)}",
             "title": title_el.text.strip(),
             "company": company_el.text.strip() if company_el else "",
             "location": loc_el.text.strip() if loc_el else loc,
@@ -1002,7 +1011,7 @@ def render_job_card(job: dict, lang: str, key_prefix: str = "") -> None:
                             unsafe_allow_html=True,
                         )
 
-        uid = job.get("id", abs(hash(job.get("url", "") + job.get("title", ""))))
+        uid = job.get("id", _stable_hash(job.get("url", "") + job.get("title", "")))
 
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
