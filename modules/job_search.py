@@ -1119,10 +1119,8 @@ def _render_jobs(lang: str):
             jobs = search_jobs(queries, sources, location, exp_level, selected_categories)
             for job in jobs:
                 job["match"] = score_job(job, profile)
-            # First-seen first (today's newly-discovered listings lead) — our
-            # own tracking, not the source's own possibly-bumped date. Match
-            # quality breaks ties within the same first-seen day.
-            jobs.sort(key=lambda j: (j.get("first_seen") or "", j["match"]), reverse=True)
+            # Posted date first, first-seen breaks ties within the same date.
+            jobs.sort(key=lambda j: (j.get("date") or "", j.get("first_seen") or ""), reverse=True)
             st.session_state.job_results = jobs
             st.session_state.job_query = ", ".join(queries[:3])
             st.session_state.selected_categories = selected_categories
