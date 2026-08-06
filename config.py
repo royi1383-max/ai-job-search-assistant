@@ -42,10 +42,12 @@ ROLE_CATEGORIES = {
         "Operational Excellence", "Operations Specialist",
         "Revenue Operations", "Revenue Operations Analyst",
         "Sales Operations", "Sales Operations Analyst",
-        "GTM Operations", "Go to Market Operations",
+        "GTM Operations", "Go to Market Operations", "GTM Analyst",
         "BizOps", "RevOps",
         "Strategy Analyst", "Corporate Strategy", "Business Strategy",
-        "Management Analyst",
+        "Strategy & Operations Analyst", "Strategy and Operations Analyst",
+        "Management Analyst", "Ecosystem Analyst", "Ecosystem Manager",
+        "Partnerships Analyst", "Innovation Analyst",
     ],
     "🚀 Product & Strategy": [
         "Product Analyst", "Product Data Analyst",
@@ -83,7 +85,7 @@ ROLE_CATEGORIES = {
 # Broad queries sent to each job source per category (broad = fewer API calls)
 PRIMARY_QUERIES = {
     "📊 Data & Analytics":     ["analyst", "business intelligence", "analytics"],
-    "💼 Business & Operations": ["operations analyst", "business analyst", "operations"],
+    "💼 Business & Operations": ["operations analyst", "business analyst", "operations", "ecosystem", "partnerships"],
     "🚀 Product & Strategy":    ["product analyst", "product operations"],
     "💰 Finance & Investment":  ["investment analyst", "financial analyst", "portfolio analyst"],
     "📅 Project Management":    ["project manager", "program manager", "implementation manager"],
@@ -100,7 +102,7 @@ PRIMARY_QUERIES = {
 # (e.g. "אנליסט/ית", "אנליסט.ית") automatically.
 PRIMARY_QUERIES_HE = {
     "📊 Data & Analytics":     ["אנליסט נתונים", "דאטה אנליסט", "אנליסט BI"],
-    "💼 Business & Operations": ["אנליסט עסקי", "אנליסט תפעולי"],
+    "💼 Business & Operations": ["אנליסט עסקי", "אנליסט תפעולי", "אקוסיסטם", "פרטנרשיפס"],
     "🚀 Product & Strategy":    ["אנליסט צמיחה", "אנליסט מוצר"],
     "💰 Finance & Investment":  ["כלכלן", "אנליסט פיננסי", "אנליסט השקעות", "אנליסט סיכונים", "אנליסט אשראי"],
     "📅 Project Management":    ["מנהל פרויקטים", "רכז פרויקטים", "מנהל תוכנית"],
@@ -121,7 +123,10 @@ MATCH_KEYWORDS = {
         "business operations", "process analyst", "process improvement",
         "revenue operations", "sales operations", "gtm operations",
         "bizops", "revops", "strategy analyst", "management analyst",
-        "operational excellence", "operations specialist",
+        "operational excellence", "operations specialist", "gtm analyst",
+        "strategy & operations analyst", "strategy and operations analyst",
+        "ecosystem analyst", "ecosystem manager", "partnerships analyst",
+        "innovation analyst",
     ],
     "🚀 Product & Strategy": [
         "product analyst", "product operations", "product strategy",
@@ -157,6 +162,7 @@ MATCH_KEYWORDS_HE = {
     ],
     "💼 Business & Operations": [
         "אנליסט עסקי", "אנליסט תפעולי", "אנליסט תכנון", "אנליסט לוגיסטיקה",
+        "אקוסיסטם", "פרטנרשיפס",
     ],
     "🚀 Product & Strategy": [
         "אנליסט צמיחה", "אנליסט מוצר", "אנליסט קמפיינים",
