@@ -268,6 +268,7 @@ GREENHOUSE_BOARDS = [
     "orioninnovation", "bringg", "torq", "doubleverify",
     "connecteam", "orcasecurity", "openweb", "descope",
     "via", "tomorrow", "helloheart", "datarails", "fireblocks",
+    "electreon", "perionnetworkltd", "playtikaltd",
     # Israeli-founded, global
     "wolt", "payoneer", "melio", "pagaya",
     # Global companies with large Israel R&D
@@ -349,7 +350,7 @@ def _fetch_lever(board: str) -> list[dict]:
 
 # Only slugs confirmed live (tested 2026-07). Others 404 or resolve to an
 # unrelated company squatting the same slug.
-SMARTRECRUITERS_BOARDS = ["atera", "armis"]
+SMARTRECRUITERS_BOARDS = ["atera", "armis", "kalturainc"]
 
 
 @st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
@@ -386,7 +387,7 @@ def _fetch_smartrecruiters(company: str) -> list[dict]:
 # Only slugs confirmed live (tested 2026-07) by inspecting actual job content —
 # a same-name slug can belong to an unrelated global company (e.g. "aleph"
 # resolves to a US FP&A startup, not the Israeli Aleph VC — excluded).
-ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant", "glow", "beach-bum"]
+ASHBY_BOARDS = ["lemonade", "honeybook", "redis", "nexxen", "aquant", "glow", "beach-bum", "chamelio"]
 
 
 @st.cache_data(ttl=JOB_SEARCH_CACHE_TTL, show_spinner=False)
